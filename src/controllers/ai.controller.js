@@ -63,8 +63,7 @@ const analyzeStudent = async (req, res) => {
 اجعل التقرير واضحاً ومختصراً ومفيداً.
 `
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
-    const result = await model.generateContent(prompt)
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
     const analysis = result.response.text()
 
     res.json({
