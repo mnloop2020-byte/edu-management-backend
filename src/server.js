@@ -7,6 +7,7 @@ const studentsRoutes = require("./routes/students.routes");
 const teachersRoutes = require("./routes/teachers.routes");
 const attendanceRoutes = require("./routes/attendance.routes");
 const paymentsRoutes = require("./routes/payments.routes");
+const aiRoutes = require("./routes/ai.routes");
 
 const app = express();
 
@@ -15,7 +16,6 @@ app.use(cors({
   credentials: true
 }));
 
-
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
@@ -23,6 +23,7 @@ app.use("/api/students", studentsRoutes);
 app.use("/api/teachers", teachersRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/payments", paymentsRoutes);
+app.use("/api/ai", aiRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "EduSystem API is running" });
