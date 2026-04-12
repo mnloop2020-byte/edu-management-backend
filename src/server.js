@@ -12,7 +12,11 @@ const aiRoutes = require("./routes/ai.routes");
 const app = express();
 
 app.use(cors({
-  origin: 'https://edu-management-system-virid.vercel.app',
+  origin: [
+    'https://edu-management-system-virid.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:5174',
+  ],
   credentials: true
 }));
 
