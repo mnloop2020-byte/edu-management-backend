@@ -1,13 +1,12 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai')
+const Groq = require('groq-sdk')
 const prisma = require('../lib/prisma')
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 const analyzeStudent = async (req, res) => {
   try {
     const studentId = Number(req.params.id)
 
-    // جيب بيانات الطالب كاملة
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: {
@@ -20,19 +19,16 @@ const analyzeStudent = async (req, res) => {
       return res.status(404).json({ message: 'الطالب غير موجود' })
     }
 
-    // حساب الإحصائيات
     const totalAttendance = student.attendance.length
     const presentCount = student.attendance.filter(a => a.status === 'present').length
     const absentCount = student.attendance.filter(a => a.status === 'absent').length
     const lateCount = student.attendance.filter(a => a.status === 'late').length
     const attendanceRate = totalAttendance ? Math.round((presentCount / totalAttendance) * 100) : 0
 
-    const totalPayments = student.payments.length
     const paidPayments = student.payments.filter(p => p.status === 'paid').length
     const pendingPayments = student.payments.filter(p => p.status === 'pending').length
     const overduePayments = student.payments.filter(p => p.status === 'overdue').length
 
-    // بناء الـ prompt
     const prompt = `
 أنت مساعد تعليمي متخصص. حلل أداء الطالب التالي وأعطني تقريراً مفصلاً باللغة العربية:
 
@@ -44,28 +40,24 @@ const analyzeStudent = async (req, res) => {
 
 إحصائيات الحضور:
 - نسبة الحضور: ${attendanceRate}%
-- عدد مرات الحضور: ${presentCount}
-- عدد مرات الغياب: ${absentCount}
-- عدد مرات التأخر: ${lateCount}
+- حضور: ${presentCount} | غياب: ${absentCount} | تأخر: ${lateCount}
 
 إحصائيات المدفوعات:
-- إجمالي الدفعات: ${totalPayments}
-- مدفوعة: ${paidPayments}
-- معلقة: ${pendingPayments}
-- متأخرة: ${overduePayments}
+- مدفوعة: ${paidPayments} | معلقة: ${pendingPayments} | متأخرة: ${overduePayments}
 
 أعطني تقريراً يشمل:
 1. تقييم عام للأداء
 2. نقاط القوة
 3. نقاط الضعف
 4. توصيات للتحسين
-
-اجعل التقرير واضحاً ومختصراً ومفيداً.
 `
 
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
-const result = await model.generateContent(prompt)
-const analysis = result.response.text()
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'llama3-8b-8192',
+    })
+
+    const analysis = completion.choices[0]?.message?.content || 'لا يوجد تحليل'
 
     res.json({
       student: {
