@@ -1,15 +1,8 @@
-/*
-  Warnings:
-
-  - You are about to drop the column `amount` on the `Payment` table. All the data in the column will be lost.
-  - Added the required column `totalAmount` to the `Payment` table without a default value. This is not possible if the table is not empty.
-
-*/
 -- AlterTable
 ALTER TABLE "Payment" DROP COLUMN "amount",
 ADD COLUMN     "dueDate" TIMESTAMP(3),
 ADD COLUMN     "paidAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
-ADD COLUMN     "totalAmount" DOUBLE PRECISION NOT NULL;
+ADD COLUMN     "totalAmount" DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 -- CreateTable
 CREATE TABLE "Setting" (
