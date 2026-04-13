@@ -45,10 +45,19 @@ model Attendance {
 }
 
 model Payment {
+  id          Int      @id @default(autoincrement())
+  studentId   Int
+  totalAmount Float
+  paidAmount  Float    @default(0)
+  dueDate     DateTime?
+  date        DateTime @default(now())
+  status      String   @default("pending")
+  student     Student  @relation(fields: [studentId], references: [id])
+}
+
+model Setting {
   id        Int      @id @default(autoincrement())
-  studentId Int
-  amount    Float
-  date      DateTime @default(now())
-  status    String   @default("pending")
-  student   Student  @relation(fields: [studentId], references: [id])
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
 }

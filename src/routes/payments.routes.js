@@ -4,6 +4,7 @@ const {
   getAllPayments,
   getPaymentsByStudent,
   createPayment,
+  addPartialPayment,
   updatePaymentStatus,
   getPaymentsSummary,
 } = require("../controllers/payments.controller");
@@ -15,6 +16,7 @@ router.get("/", getAllPayments);
 router.get("/summary", getPaymentsSummary);
 router.get("/student/:studentId", getPaymentsByStudent);
 router.post("/", createPayment);
+router.patch("/:id/pay", addPartialPayment);
 router.patch("/:id/status", updatePaymentStatus);
 
 module.exports = router;

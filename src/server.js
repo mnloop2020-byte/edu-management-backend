@@ -8,6 +8,7 @@ const teachersRoutes = require("./routes/teachers.routes");
 const attendanceRoutes = require("./routes/attendance.routes");
 const paymentsRoutes = require("./routes/payments.routes");
 const aiRoutes = require("./routes/ai.routes");
+const settingsRoutes = require("./routes/settings.routes");
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.use("/api/teachers", teachersRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/payments", paymentsRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/settings", settingsRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "EduSystem API is running" });
