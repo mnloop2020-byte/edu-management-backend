@@ -45,14 +45,24 @@ model Attendance {
 }
 
 model Payment {
-  id          Int      @id @default(autoincrement())
-  studentId   Int
-  totalAmount Float
-  paidAmount  Float    @default(0)
-  dueDate     DateTime?
-  date        DateTime @default(now())
-  status      String   @default("pending")
-  student     Student  @relation(fields: [studentId], references: [id])
+  id           Int                  @id @default(autoincrement())
+  studentId    Int
+  totalAmount  Float
+  paidAmount   Float                @default(0)
+  dueDate      DateTime?
+  date         DateTime             @default(now())
+  status       String               @default("pending")
+  student      Student              @relation(fields: [studentId], references: [id])
+  transactions PaymentTransaction[]
+}
+
+model PaymentTransaction {
+  id        Int      @id @default(autoincrement())
+  paymentId Int
+  amount    Float
+  note      String?
+  date      DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 }
 
 model Setting {
