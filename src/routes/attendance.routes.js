@@ -6,7 +6,7 @@ const {
   getAttendanceSummary,
     getWeeklyAttendance,
 } = require("../controllers/attendance.controller");
-const { protect } = require("../middleware/auth.middleware");
+const { protect, requireAdmin } = require("../middleware/auth.middleware");
 
 router.use(protect);
 
@@ -14,6 +14,6 @@ router.use(protect);
 router.get("/weekly", getWeeklyAttendance);
 router.get("/", getAttendanceByDate);
 router.get("/summary", getAttendanceSummary);
-router.post("/", markAttendance);
+router.post("/", requireAdmin, markAttendance);
 
 module.exports = router;

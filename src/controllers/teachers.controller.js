@@ -8,7 +8,7 @@ const getAllTeachers = async (req, res) => {
     res.json({ teachers });
   } catch (err) {
     console.error("getAllTeachers error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    res.status(500).json({ message: "Failed to load teachers" });
   }
 };
 
@@ -17,51 +17,81 @@ const getTeacherById = async (req, res) => {
     const teacher = await prisma.teacher.findUnique({
       where: { id: Number(req.params.id) },
     });
-    if (!teacher) return res.status(404).json({ message: "المدرس غير موجود" });
+
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
     res.json({ teacher });
   } catch (err) {
     console.error("getTeacherById error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    res.status(500).json({ message: "Failed to load teacher" });
   }
 };
 
 const createTeacher = async (req, res) => {
   try {
     const { name, subject, phone, classes } = req.body;
+
     if (!name || !subject) {
-      return res.status(400).json({ message: "الاسم والمادة مطلوبان" });
+      return res.status(400).json({ message: "name and subject are required" });
     }
+
     const teacher = await prisma.teacher.create({
-      data: { name, subject, phone, classes: classes || 0 },
+      data: {
+        name,
+        subject,
+        phone: phone || null,
+        classes: Number.isFinite(Number(classes)) ? Number(classes) : 0,
+      },
     });
-    res.status(201).json({ message: "تم إضافة المدرس", teacher });
+
+    res.status(201).json({ message: "Teacher created successfully", teacher });
   } catch (err) {
     console.error("createTeacher error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    res.status(500).json({ message: "Failed to create teacher" });
   }
 };
 
 const updateTeacher = async (req, res) => {
   try {
+    const teacherId = Number(req.params.id);
     const { name, subject, phone, classes } = req.body;
+
+    const existing = await prisma.teacher.findUnique({ where: { id: teacherId } });
+    if (!existing) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    const data = {};
+    if (name !== undefined) data.name = name;
+    if (subject !== undefined) data.subject = subject;
+    if (phone !== undefined) data.phone = phone;
+    if (classes !== undefined) data.classes = Number(classes);
+
     const teacher = await prisma.teacher.update({
-      where: { id: Number(req.params.id) },
-      data: { name, subject, phone, classes },
+      where: { id: teacherId },
+      data,
     });
-    res.json({ message: "تم تحديث المدرس", teacher });
+
+    res.json({ message: "Teacher updated successfully", teacher });
   } catch (err) {
     console.error("updateTeacher error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    res.status(500).json({ message: "Failed to update teacher" });
   }
 };
 
 const deleteTeacher = async (req, res) => {
   try {
-    await prisma.teacher.delete({ where: { id: Number(req.params.id) } });
-    res.json({ message: "تم حذف المدرس" });
+    const teacherId = Number(req.params.id);
+    await prisma.teacher.delete({ where: { id: teacherId } });
+    res.json({ message: "Teacher deleted successfully" });
   } catch (err) {
     console.error("deleteTeacher error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    if (err.code === "P2025") {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+    res.status(500).json({ message: "Failed to delete teacher" });
   }
 };
 

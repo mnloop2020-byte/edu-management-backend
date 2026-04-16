@@ -7,14 +7,14 @@ const {
   updateStudent,
   deleteStudent,
 } = require("../controllers/students.controller");
-const { protect } = require("../middleware/auth.middleware");
+const { protect, requireAdmin } = require("../middleware/auth.middleware");
 
 router.use(protect);
 
 router.get("/", getAllStudents);
 router.get("/:id", getStudentById);
-router.post("/", createStudent);
-router.put("/:id", updateStudent);
-router.delete("/:id", deleteStudent);
+router.post("/", requireAdmin, createStudent);
+router.put("/:id", requireAdmin, updateStudent);
+router.delete("/:id", requireAdmin, deleteStudent);
 
 module.exports = router;

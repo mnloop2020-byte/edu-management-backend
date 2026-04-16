@@ -12,7 +12,7 @@ model User {
   name      String
   email     String   @unique
   password  String
-  role      String   @default("admin")
+  role      String   @default("ADMIN")
   createdAt DateTime @default(now())
 }
 
@@ -41,7 +41,9 @@ model Attendance {
   studentId Int
   date      DateTime @default(now())
   status    String
-  student   Student  @relation(fields: [studentId], references: [id])
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, date])
 }
 
 model Payment {
@@ -52,7 +54,7 @@ model Payment {
   dueDate      DateTime?
   date         DateTime             @default(now())
   status       String               @default("pending")
-  student      Student              @relation(fields: [studentId], references: [id])
+  student      Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
   transactions PaymentTransaction[]
 }
 

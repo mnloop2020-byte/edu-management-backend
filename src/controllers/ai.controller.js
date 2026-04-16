@@ -1,11 +1,34 @@
-const Groq = require('groq-sdk')
-const prisma = require('../lib/prisma')
+const Groq = require("groq-sdk");
+const prisma = require("../lib/prisma");
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+const summarizePayment = (payment) => {
+  const remaining = Math.max(0, payment.totalAmount - payment.paidAmount);
+  let status = "pending";
+
+  if (remaining <= 0 && payment.totalAmount > 0) status = "paid";
+  else if (payment.paidAmount > 0) status = "partial";
+
+  if (payment.dueDate && remaining > 0) {
+    const dueDate = new Date(payment.dueDate);
+    dueDate.setHours(23, 59, 59, 999);
+    if (dueDate < new Date()) status = "overdue";
+  }
+
+  return {
+    student: payment.student?.name,
+    totalAmount: payment.totalAmount,
+    paidAmount: payment.paidAmount,
+    remaining,
+    status,
+    date: payment.date,
+  };
+};
 
 const analyzeStudent = async (req, res) => {
   try {
-    const studentId = Number(req.params.id)
+    const studentId = Number(req.params.id);
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
@@ -13,51 +36,56 @@ const analyzeStudent = async (req, res) => {
         attendance: true,
         payments: true,
       },
-    })
+    });
 
     if (!student) {
-      return res.status(404).json({ message: 'الطالب غير موجود' })
+      return res.status(404).json({ message: "Student not found" });
     }
 
-    const totalAttendance = student.attendance.length
-    const presentCount = student.attendance.filter(a => a.status === 'present').length
-    const absentCount = student.attendance.filter(a => a.status === 'absent').length
-    const lateCount = student.attendance.filter(a => a.status === 'late').length
-    const attendanceRate = totalAttendance ? Math.round((presentCount / totalAttendance) * 100) : 0
+    const totalAttendance = student.attendance.length;
+    const presentCount = student.attendance.filter((item) => item.status === "present").length;
+    const absentCount = student.attendance.filter((item) => item.status === "absent").length;
+    const lateCount = student.attendance.filter((item) => item.status === "late").length;
+    const attendanceRate = totalAttendance ? Math.round((presentCount / totalAttendance) * 100) : 0;
 
-    const paidPayments = student.payments.filter(p => p.status === 'paid').length
-    const pendingPayments = student.payments.filter(p => p.status === 'pending').length
-    const overduePayments = student.payments.filter(p => p.status === 'overdue').length
+    const normalizedPayments = student.payments.map(summarizePayment);
+    const paidPayments = normalizedPayments.filter((item) => item.status === "paid").length;
+    const pendingPayments = normalizedPayments.filter((item) => item.status === "pending").length;
+    const overduePayments = normalizedPayments.filter((item) => item.status === "overdue").length;
 
     const prompt = `
-أنت مساعد تعليمي متخصص. حلل أداء الطالب التالي وأعطني تقريراً مفصلاً باللغة العربية:
+You are an education assistant. Write a concise Arabic report about this student.
 
-معلومات الطالب:
-- الاسم: ${student.name}
-- الكورس: ${student.course}
-- الدرجة: ${student.grade || 'غير محددة'}
-- الحالة: ${student.status}
+Student:
+- Name: ${student.name}
+- Course: ${student.course}
+- Grade: ${student.grade || "غير محدد"}
+- Status: ${student.status}
 
-إحصائيات الحضور:
-- نسبة الحضور: ${attendanceRate}%
-- حضور: ${presentCount} | غياب: ${absentCount} | تأخر: ${lateCount}
+Attendance:
+- Rate: ${attendanceRate}%
+- Present: ${presentCount}
+- Absent: ${absentCount}
+- Late: ${lateCount}
 
-إحصائيات المدفوعات:
-- مدفوعة: ${paidPayments} | معلقة: ${pendingPayments} | متأخرة: ${overduePayments}
+Payments:
+- Paid: ${paidPayments}
+- Pending: ${pendingPayments}
+- Overdue: ${overduePayments}
 
-أعطني تقريراً يشمل:
-1. تقييم عام للأداء
+Return the report in Arabic with:
+1. تقييم عام
 2. نقاط القوة
-3. نقاط الضعف
-4. توصيات للتحسين
-`
+3. نقاط تحتاج متابعة
+4. توصيات عملية
+`;
 
     const completion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.3-70b-versatile',
-    })
+      messages: [{ role: "user", content: prompt }],
+      model: "llama-3.3-70b-versatile",
+    });
 
-    const analysis = completion.choices[0]?.message?.content || 'لا يوجد تحليل'
+    const analysis = completion.choices[0]?.message?.content || "لا يوجد تحليل";
 
     res.json({
       student: {
@@ -77,77 +105,90 @@ const analyzeStudent = async (req, res) => {
         overduePayments,
       },
       analysis,
-    })
+    });
   } catch (err) {
-    console.error('analyzeStudent error:', err)
-    res.status(500).json({ message: 'خطأ في السيرفر' })
+    console.error("analyzeStudent error:", err);
+    res.status(500).json({ message: "Server error" });
   }
-}
+};
 
 const chatbot = async (req, res) => {
   try {
-    const { message, history } = req.body
+    const { message, history } = req.body;
 
     if (!message) {
-      return res.status(400).json({ message: 'الرسالة مطلوبة' })
+      return res.status(400).json({ message: "message is required" });
     }
 
-    // جلب كل البيانات من قاعدة البيانات
     const [students, payments, attendanceRecords] = await Promise.all([
-      prisma.student.findMany({ orderBy: { id: 'asc' } }),
-      prisma.payment.findMany({ include: { student: { select: { name: true } } }, orderBy: { date: 'desc' } }),
-      prisma.attendance.findMany({ include: { student: { select: { name: true } } }, orderBy: { date: 'desc' }, take: 100 }),
-    ])
+      prisma.student.findMany({ orderBy: { id: "asc" } }),
+      prisma.payment.findMany({
+        include: { student: { select: { name: true } } },
+        orderBy: { date: "desc" },
+      }),
+      prisma.attendance.findMany({
+        include: { student: { select: { name: true } } },
+        orderBy: { date: "desc" },
+        take: 100,
+      }),
+    ]);
 
-    const totalPayments = payments.reduce((s, p) => s + p.amount, 0)
-    const paidPayments = payments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0)
-    const pendingPayments = payments.filter(p => p.status === 'pending').reduce((s, p) => s + p.amount, 0)
-    const overduePayments = payments.filter(p => p.status === 'overdue').reduce((s, p) => s + p.amount, 0)
+    const normalizedPayments = payments.map(summarizePayment);
+    const totalPayments = normalizedPayments.reduce((sum, item) => sum + item.totalAmount, 0);
+    const paidPayments = normalizedPayments.reduce((sum, item) => sum + item.paidAmount, 0);
+    const pendingPayments = normalizedPayments
+      .filter((item) => item.status === "pending")
+      .reduce((sum, item) => sum + item.remaining, 0);
+    const overduePayments = normalizedPayments
+      .filter((item) => item.status === "overdue")
+      .reduce((sum, item) => sum + item.remaining, 0);
 
-    const systemPrompt = `أنت مساعد ذكي لنظام إدارة تعليمي. لديك البيانات التالية الحقيقية:
+    const systemPrompt = `أنت مساعد ذكي لنظام إدارة تعليمية.
 
-## الطلاب (${students.length} طالب):
-${JSON.stringify(students.map(s => ({ id: s.id, name: s.name, course: s.course, grade: s.grade, status: s.status })))}
+أجب دائمًا بالعربية، واعتمد فقط على البيانات التالية:
 
-## ملخص المدفوعات:
-- الإجمالي: ${totalPayments} ريال
-- المحصّل: ${paidPayments} ريال  
-- المعلق: ${pendingPayments} ريال
-- المتأخر: ${overduePayments} ريال
+الطلاب (${students.length}):
+${JSON.stringify(students.map((student) => ({
+  id: student.id,
+  name: student.name,
+  course: student.course,
+  grade: student.grade,
+  status: student.status,
+})))}
 
-## سجلات الدفع (${payments.length} سجل):
-${JSON.stringify(payments.map(p => ({ student: p.student?.name, amount: p.amount, status: p.status, date: p.date })))}
+ملخص المدفوعات:
+- إجمالي الرسوم: ${totalPayments}
+- المدفوع: ${paidPayments}
+- المعلّق: ${pendingPayments}
+- المتأخر: ${overduePayments}
 
-## سجلات الحضور (آخر ${attendanceRecords.length} سجل):
-${JSON.stringify(attendanceRecords.map(a => ({ student: a.student?.name, status: a.status, date: a.date })))}
+سجلات المدفوعات (${normalizedPayments.length}):
+${JSON.stringify(normalizedPayments)}
 
-## تعليمات:
-- أجب بالعربية دائماً
-- كن محدداً واذكر الأرقام والأسماء الحقيقية من البيانات
-- إذا سألوا عن طالب معين ابحث في القائمة وأعطِ معلومات دقيقة
-- إذا طلبوا ملخصاً أعطِ إحصائيات شاملة
-- كن مختصراً وواضحاً`
+سجلات الحضور (آخر ${attendanceRecords.length} سجل):
+${JSON.stringify(attendanceRecords.map((record) => ({
+  student: record.student?.name,
+  status: record.status,
+  date: record.date,
+})))}
 
-    const messages = [
-      ...(history || []),
-      { role: 'user', content: message }
-    ]
+كن واضحًا، واستخدم الأرقام والأسماء الحقيقية من البيانات، ولا تخمّن معلومات غير موجودة.`;
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: "llama-3.3-70b-versatile",
       messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages,
+        { role: "system", content: systemPrompt },
+        ...(history || []),
+        { role: "user", content: message },
       ],
-    })
+    });
 
-    const reply = completion.choices[0]?.message?.content || 'عذراً، لم أتمكن من الإجابة.'
-
-    res.json({ reply })
+    const reply = completion.choices[0]?.message?.content || "عذرًا، لم أتمكن من الإجابة.";
+    res.json({ reply });
   } catch (err) {
-    console.error('chatbot error:', err)
-    res.status(500).json({ message: 'خطأ في السيرفر' })
+    console.error("chatbot error:", err);
+    res.status(500).json({ message: "Server error" });
   }
-}
+};
 
-module.exports = { analyzeStudent, chatbot }
+module.exports = { analyzeStudent, chatbot };

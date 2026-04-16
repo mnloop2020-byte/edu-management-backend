@@ -1,11 +1,19 @@
 const prisma = require("../lib/prisma");
 
+const normalizeDay = (value) => {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
 const getAttendanceByDate = async (req, res) => {
   try {
-    const { date } = req.query;
+    const start = normalizeDay(req.query.date);
+    if (!start) {
+      return res.status(400).json({ message: "Invalid attendance date" });
+    }
 
-    const start = date ? new Date(date) : new Date();
-    start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setHours(23, 59, 59, 999);
 
@@ -18,58 +26,72 @@ const getAttendanceByDate = async (req, res) => {
     res.json({ records });
   } catch (err) {
     console.error("getAttendanceByDate error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    res.status(500).json({ message: "Failed to load attendance" });
   }
 };
 
 const markAttendance = async (req, res) => {
   try {
     const { studentId, status, date } = req.body;
+    const parsedStudentId = Number(studentId);
 
-    if (!studentId || !status) {
-      return res.status(400).json({ message: "studentId والحالة مطلوبان" });
+    if (!parsedStudentId || !status) {
+      return res.status(400).json({ message: "studentId and status are required" });
     }
 
     const validStatuses = ["present", "absent", "late"];
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "الحالة غير صالحة" });
+      return res.status(400).json({ message: "Invalid attendance status" });
     }
 
-    const recordDate = date ? new Date(date) : new Date();
-    recordDate.setHours(0, 0, 0, 0);
+    const recordDate = normalizeDay(date);
+    if (!recordDate) {
+      return res.status(400).json({ message: "Invalid attendance date" });
+    }
+
     const endOfDay = new Date(recordDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const existing = await prisma.attendance.findFirst({
-      where: {
-        studentId: Number(studentId),
-        date: { gte: recordDate, lte: endOfDay },
-      },
+    const student = await prisma.student.findUnique({
+      where: { id: parsedStudentId },
+      select: { id: true },
     });
 
-    let record;
-    if (existing) {
-      record = await prisma.attendance.update({
-        where: { id: existing.id },
-        data: { status },
-      });
-    } else {
-      record = await prisma.attendance.create({
-        data: { studentId: Number(studentId), status, date: recordDate },
-      });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
     }
 
-    res.json({ message: "تم تسجيل الحضور", record });
+    const record = await prisma.$transaction(async (tx) => {
+      const existing = await tx.attendance.findFirst({
+        where: {
+          studentId: parsedStudentId,
+          date: { gte: recordDate, lte: endOfDay },
+        },
+        orderBy: { id: "asc" },
+      });
+
+      if (existing) {
+        return tx.attendance.update({
+          where: { id: existing.id },
+          data: { status },
+        });
+      }
+
+      return tx.attendance.create({
+        data: { studentId: parsedStudentId, status, date: recordDate },
+      });
+    });
+
+    res.json({ message: "Attendance saved successfully", record });
   } catch (err) {
     console.error("markAttendance error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    res.status(500).json({ message: "Failed to save attendance" });
   }
 };
 
 const getAttendanceSummary = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = normalizeDay();
     const endOfDay = new Date(today);
     endOfDay.setHours(23, 59, 59, 999);
 
@@ -83,32 +105,34 @@ const getAttendanceSummary = async (req, res) => {
     res.json({ summary: { present, absent, late, totalStudents } });
   } catch (err) {
     console.error("getAttendanceSummary error:", err);
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    res.status(500).json({ message: "Failed to load attendance summary" });
   }
 };
 
-// بعد getAttendanceSummary أضف الدالة:
 const getWeeklyAttendance = async (req, res) => {
   try {
-    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const results = [];
-    for (let i = 6; i >= 0; i--) {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const promises = Array.from({ length: 7 }, (_, index) => {
       const day = new Date();
-      day.setDate(day.getDate() - i);
+      day.setDate(day.getDate() - (6 - index));
       day.setHours(0, 0, 0, 0);
       const end = new Date(day);
       end.setHours(23, 59, 59, 999);
-      const count = await prisma.attendance.count({
+
+      return prisma.attendance.count({
         where: { status: "present", date: { gte: day, lte: end } },
-      });
-      results.push({ day: days[day.getDay()], students: count });
-    }
-    res.json({ weekly: results });
+      }).then((count) => ({
+        day: days[day.getDay()],
+        students: count,
+      }));
+    });
+
+    const weekly = await Promise.all(promises);
+    res.json({ weekly });
   } catch (err) {
-    res.status(500).json({ message: "خطأ في السيرفر" });
+    console.error("getWeeklyAttendance error:", err);
+    res.status(500).json({ message: "Failed to load weekly attendance" });
   }
 };
 
-// وفي module.exports أضف:
-// getWeeklyAttendance
 module.exports = { getAttendanceByDate, markAttendance, getAttendanceSummary, getWeeklyAttendance };
