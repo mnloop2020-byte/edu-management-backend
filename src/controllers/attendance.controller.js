@@ -87,4 +87,28 @@ const getAttendanceSummary = async (req, res) => {
   }
 };
 
-module.exports = { getAttendanceByDate, markAttendance, getAttendanceSummary };
+// بعد getAttendanceSummary أضف الدالة:
+const getWeeklyAttendance = async (req, res) => {
+  try {
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const results = [];
+    for (let i = 6; i >= 0; i--) {
+      const day = new Date();
+      day.setDate(day.getDate() - i);
+      day.setHours(0, 0, 0, 0);
+      const end = new Date(day);
+      end.setHours(23, 59, 59, 999);
+      const count = await prisma.attendance.count({
+        where: { status: "present", date: { gte: day, lte: end } },
+      });
+      results.push({ day: days[day.getDay()], students: count });
+    }
+    res.json({ weekly: results });
+  } catch (err) {
+    res.status(500).json({ message: "خطأ في السيرفر" });
+  }
+};
+
+// وفي module.exports أضف:
+// getWeeklyAttendance
+module.exports = { getAttendanceByDate, markAttendance, getAttendanceSummary, getWeeklyAttendance };

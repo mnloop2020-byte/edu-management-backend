@@ -58,54 +58,16 @@ const getPaymentTransactions = async (req, res) => {
 
 const createPayment = async (req, res) => {
   try {
-    const { studentId, paidAmount, dueDate, note, payDate } = req.body;
+    const { studentId, paidAmount, dueDate, note } = req.body;
 
     if (!studentId || paidAmount === undefined) {
       return res.status(400).json({ message: "studentId والمبلغ المدفوع مطلوبان" });
     }
 
-    const paid = Number(paidAmount);
-    const txDate = payDate ? new Date(payDate) : new Date();
-
-    // ✅ منع التكرار — إذا الطالب عنده سجل موجود، أضف كدفعة جزئية
-    const existing = await prisma.payment.findFirst({
-      where: { studentId: Number(studentId) },
-    });
-
-    if (existing) {
-      const newPaid = existing.paidAmount + paid;
-      const newStatus = newPaid >= existing.totalAmount ? "paid" : paid > 0 ? "partial" : existing.status;
-
-      const updated = await prisma.payment.update({
-        where: { id: existing.id },
-        data: {
-          paidAmount: newPaid,
-          status: newStatus,
-          dueDate: dueDate ? new Date(dueDate) : existing.dueDate,
-          transactions: paid > 0 ? {
-            create: { amount: paid, note: note || null, date: txDate }
-          } : undefined,
-        },
-        include: {
-          student: { select: { id: true, name: true, course: true } },
-          transactions: { orderBy: { date: "desc" } },
-        },
-      });
-
-      return res.status(201).json({
-        message: "تم إضافة الدفعة على السجل الموجود",
-        payment: {
-          ...updated,
-          remaining: updated.totalAmount - updated.paidAmount,
-          percentage: updated.totalAmount > 0 ? Math.round((updated.paidAmount / updated.totalAmount) * 100) : 0,
-        },
-      });
-    }
-
-    // إنشاء سجل جديد إذا لم يكن موجوداً
     const feeSetting = await prisma.setting.findUnique({ where: { key: "annual_fee" } });
     const totalAmount = feeSetting ? Number(feeSetting.value) : 0;
 
+    const paid = Number(paidAmount);
     let status = "pending";
     if (paid >= totalAmount) status = "paid";
     else if (paid > 0) status = "partial";
@@ -118,7 +80,7 @@ const createPayment = async (req, res) => {
         dueDate: dueDate ? new Date(dueDate) : null,
         status,
         transactions: paid > 0 ? {
-          create: { amount: paid, note: note || null, date: txDate }
+          create: { amount: paid, note: note || null, date: new Date() }
         } : undefined,
       },
       include: {
@@ -143,7 +105,7 @@ const createPayment = async (req, res) => {
 
 const addPartialPayment = async (req, res) => {
   try {
-    const { amount, note, date } = req.body;
+    const { amount, note } = req.body;
     const paymentId = Number(req.params.id);
 
     if (!amount) return res.status(400).json({ message: "المبلغ مطلوب" });
@@ -153,8 +115,6 @@ const addPartialPayment = async (req, res) => {
 
     const newPaid = existing.paidAmount + Number(amount);
     const newStatus = newPaid >= existing.totalAmount ? "paid" : "partial";
-    // ✅ تاريخ الدفع يمكن تحديده يدوياً
-    const txDate = date ? new Date(date) : new Date();
 
     const payment = await prisma.payment.update({
       where: { id: paymentId },
@@ -162,7 +122,7 @@ const addPartialPayment = async (req, res) => {
         paidAmount: newPaid,
         status: newStatus,
         transactions: {
-          create: { amount: Number(amount), note: note || null, date: txDate }
+          create: { amount: Number(amount), note: note || null, date: new Date() }
         },
       },
       include: {
@@ -187,7 +147,6 @@ const addPartialPayment = async (req, res) => {
 
 const deletePayment = async (req, res) => {
   try {
-    await prisma.paymentTransaction.deleteMany({ where: { paymentId: Number(req.params.id) } });
     await prisma.payment.delete({ where: { id: Number(req.params.id) } });
     res.json({ message: "تم حذف سجل الدفع" });
   } catch (err) {
@@ -248,4 +207,3 @@ module.exports = {
   updatePaymentStatus,
   getPaymentsSummary,
 };
-
