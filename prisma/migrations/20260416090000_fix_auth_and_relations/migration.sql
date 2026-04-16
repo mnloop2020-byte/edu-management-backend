@@ -18,5 +18,12 @@ ALTER TABLE "Payment"
 ADD CONSTRAINT "Payment_studentId_fkey"
 FOREIGN KEY ("studentId") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- Remove duplicate attendance rows before adding the unique index.
+DELETE FROM "Attendance" a
+USING "Attendance" b
+WHERE a."id" > b."id"
+  AND a."studentId" = b."studentId"
+  AND a."date" = b."date";
+
 -- Prevent duplicate attendance rows for the same normalized day.
 CREATE UNIQUE INDEX "Attendance_studentId_date_key" ON "Attendance"("studentId", "date");
