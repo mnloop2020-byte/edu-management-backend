@@ -152,10 +152,11 @@ const createPayment = async (req, res) => {
         const resolvedDueDate = dueDate === undefined ? existing.dueDate : nextDueDate;
         const status = getPaymentStatus(nextPaidAmount, existing.totalAmount, resolvedDueDate);
 
-        return tx.payment.update({
+       return tx.payment.update({
           where: { id: existing.id },
           data: {
             paidAmount: nextPaidAmount,
+            totalAmount: annualFee,
             dueDate: resolvedDueDate,
             status,
             transactions: amount > 0
