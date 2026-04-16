@@ -222,6 +222,10 @@ const addPartialPayment = async (req, res) => {
 
       if (!existing) return null;
 
+if (existing.paidAmount + amount > existing.totalAmount) {
+  throw new Error(`OVERPAYMENT:${existing.totalAmount - existing.paidAmount}`);
+}
+
       const nextPaidAmount = existing.paidAmount + amount;
       const status = getPaymentStatus(nextPaidAmount, existing.totalAmount, existing.dueDate);
 
@@ -253,8 +257,12 @@ const addPartialPayment = async (req, res) => {
       message: "Payment updated successfully",
       payment: enrichPayment(payment),
     });
-  } catch (err) {
+} catch (err) {
     console.error("addPartialPayment error:", err);
+    if (err.message?.startsWith('OVERPAYMENT:')) {
+      const remaining = err.message.split(':')[1];
+      return res.status(400).json({ message: `المبلغ يتجاوز المتبقي! المتبقي فقط ${remaining} ريال` });
+    }
     res.status(500).json({ message: "Failed to add partial payment" });
   }
 };
