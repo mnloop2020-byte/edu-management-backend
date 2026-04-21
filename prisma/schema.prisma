@@ -57,6 +57,7 @@ model Teacher {
   name                 String
   subject              String
   phone                String?
+  avatarUrl            String?
   classes              Int                          @default(0)
   createdAt            DateTime                     @default(now())
   user                 User?                        @relation(fields: [userId], references: [id], onDelete: SetNull)

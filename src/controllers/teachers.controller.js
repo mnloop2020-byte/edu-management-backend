@@ -32,7 +32,7 @@ const getTeacherById = async (req, res) => {
 
 const createTeacher = async (req, res) => {
   try {
-    const { name, subject, phone, classes } = req.body;
+    const { name, subject, phone, avatarUrl, classes } = req.body;
 
     if (!name || !subject) {
       return res.status(400).json({ message: "name and subject are required" });
@@ -43,6 +43,7 @@ const createTeacher = async (req, res) => {
         name,
         subject,
         phone: phone || null,
+        avatarUrl: avatarUrl || null,
         classes: Number.isFinite(Number(classes)) ? Number(classes) : 0,
       },
     });
@@ -66,7 +67,7 @@ const createTeacher = async (req, res) => {
 const updateTeacher = async (req, res) => {
   try {
     const teacherId = Number(req.params.id);
-    const { name, subject, phone, classes } = req.body;
+    const { name, subject, phone, avatarUrl, classes } = req.body;
 
     const existing = await prisma.teacher.findUnique({ where: { id: teacherId } });
     if (!existing) {
@@ -77,6 +78,7 @@ const updateTeacher = async (req, res) => {
     if (name !== undefined) data.name = name;
     if (subject !== undefined) data.subject = subject;
     if (phone !== undefined) data.phone = phone;
+    if (avatarUrl !== undefined) data.avatarUrl = avatarUrl || null;
     if (classes !== undefined) data.classes = Number(classes);
 
     const teacher = await prisma.teacher.update({
