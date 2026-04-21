@@ -145,7 +145,7 @@ const chatbot = async (req, res) => {
 
     const systemPrompt = `أنت مساعد ذكي لنظام إدارة تعليمية.
 
-أجب دائمًا بالعربية، واعتمد فقط على البيانات التالية:
+أجب دائماً بالعربية، واعتمد فقط على البيانات التالية:
 
 الطلاب (${students.length}):
 ${JSON.stringify(students.map((student) => ({
@@ -172,7 +172,7 @@ ${JSON.stringify(attendanceRecords.map((record) => ({
   date: record.date,
 })))}
 
-كن واضحًا، واستخدم الأرقام والأسماء الحقيقية من البيانات، ولا تخمّن معلومات غير موجودة.`;
+كن واضحاً، واستخدم الأرقام والأسماء الحقيقية من البيانات، ولا تخمّن معلومات غير موجودة.`;
 
     const completion = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
@@ -183,7 +183,7 @@ ${JSON.stringify(attendanceRecords.map((record) => ({
       ],
     });
 
-    const reply = completion.choices[0]?.message?.content || "عذرًا، لم أتمكن من الإجابة.";
+    const reply = completion.choices[0]?.message?.content || "عذراً، لم أتمكن من الإجابة.";
     res.json({ reply });
   } catch (err) {
     console.error("chatbot error:", err);

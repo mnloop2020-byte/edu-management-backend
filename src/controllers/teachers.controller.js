@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { createAuditLog } = require("../services/audit.service");
 
 const getAllTeachers = async (req, res) => {
   try {
@@ -46,6 +47,15 @@ const createTeacher = async (req, res) => {
       },
     });
 
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "TEACHER_CREATE",
+      entityType: "Teacher",
+      entityId: teacher.id,
+      summary: `Created teacher ${teacher.name}`,
+      metadata: { subject: teacher.subject },
+    });
+
     res.status(201).json({ message: "Teacher created successfully", teacher });
   } catch (err) {
     console.error("createTeacher error:", err);
@@ -74,6 +84,15 @@ const updateTeacher = async (req, res) => {
       data,
     });
 
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "TEACHER_UPDATE",
+      entityType: "Teacher",
+      entityId: teacher.id,
+      summary: `Updated teacher ${teacher.name}`,
+      metadata: data,
+    });
+
     res.json({ message: "Teacher updated successfully", teacher });
   } catch (err) {
     console.error("updateTeacher error:", err);
@@ -84,7 +103,14 @@ const updateTeacher = async (req, res) => {
 const deleteTeacher = async (req, res) => {
   try {
     const teacherId = Number(req.params.id);
-    await prisma.teacher.delete({ where: { id: teacherId } });
+    const deleted = await prisma.teacher.delete({ where: { id: teacherId } });
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "TEACHER_DELETE",
+      entityType: "Teacher",
+      entityId: teacherId,
+      summary: `Deleted teacher ${deleted.name}`,
+    });
     res.json({ message: "Teacher deleted successfully" });
   } catch (err) {
     console.error("deleteTeacher error:", err);

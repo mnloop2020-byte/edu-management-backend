@@ -8,32 +8,301 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  password  String
-  role      String   @default("ADMIN")
-  createdAt DateTime @default(now())
+  id                    Int                    @id @default(autoincrement())
+  name                  String
+  email                 String                 @unique
+  password              String
+  role                  String                 @default("ADMIN")
+  createdAt             DateTime               @default(now())
+  student               Student?
+  teacher               Teacher?
+  parentProfile         ParentProfile?
+  createdCommunications CommunicationMessage[] @relation("CommunicationCreatedBy")
+  communicationTemplates CommunicationTemplate[] @relation("CommunicationTemplateCreatedBy")
+  auditLogs             AuditLog[]
+}
+
+model Institution {
+  id              Int             @id @default(autoincrement())
+  name            String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  subjects        Subject[]
+  semesters       Semester[]
+  gradingPolicies GradingPolicy[]
 }
 
 model Student {
-  id         Int          @id @default(autoincrement())
-  name       String
-  course     String
-  grade      String?
-  status     String       @default("Active")
-  joinedAt   DateTime     @default(now())
-  attendance Attendance[]
-  payments   Payment[]
+  id                  Int                    @id @default(autoincrement())
+  userId              Int?                   @unique
+  name                String
+  course              String
+  grade               String?
+  status              String                 @default("Active")
+  joinedAt            DateTime               @default(now())
+  user                User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  attendance          Attendance[]
+  payments            Payment[]
+  classes             StudentClass[]
+  events              CalendarEvent[]
+  academicEnrollments StudentEnrollment[]
+  submissions         AssignmentSubmission[]
+  parentLinks         ParentStudentLink[]
+  communications      CommunicationMessage[] @relation("CommunicationStudentRecipient")
 }
 
 model Teacher {
-  id        Int      @id @default(autoincrement())
-  name      String
-  subject   String
-  phone     String?
-  classes   Int      @default(0)
-  createdAt DateTime @default(now())
+  id                   Int                          @id @default(autoincrement())
+  userId               Int?                         @unique
+  name                 String
+  subject              String
+  phone                String?
+  classes              Int                          @default(0)
+  createdAt            DateTime                     @default(now())
+  user                 User?                        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  academicClasses      AcademicClass[]
+  subjectOfferings     SubjectOffering[]
+  events               CalendarEvent[]
+  assignments          Assignment[]
+  performanceSnapshots TeacherPerformanceSnapshot[]
+  communications       CommunicationMessage[] @relation("CommunicationTeacherRecipient")
+}
+
+model ParentProfile {
+  id             Int                    @id @default(autoincrement())
+  userId         Int?                   @unique
+  name           String
+  email          String?
+  phone          String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  user           User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  studentLinks   ParentStudentLink[]
+  communications CommunicationMessage[] @relation("CommunicationParentRecipient")
+}
+
+model ParentStudentLink {
+  id           Int           @id @default(autoincrement())
+  parentId     Int
+  studentId    Int
+  relationType String        @default("Guardian")
+  createdAt    DateTime      @default(now())
+  parent       ParentProfile @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student      Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, studentId])
+  @@index([studentId])
+}
+
+model CommunicationMessage {
+  id                Int                  @id @default(autoincrement())
+  subject           String
+  body              String
+  audienceType      CommunicationAudience
+  channel           CommunicationChannel @default(IN_APP)
+  status            CommunicationStatus  @default(DRAFT)
+  createdById       Int?
+  recipientStudentId Int?
+  recipientTeacherId Int?
+  recipientParentId Int?
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  templateId        Int?
+  createdBy         User?                @relation("CommunicationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  template          CommunicationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  recipientStudent  Student?             @relation("CommunicationStudentRecipient", fields: [recipientStudentId], references: [id], onDelete: SetNull)
+  recipientTeacher  Teacher?             @relation("CommunicationTeacherRecipient", fields: [recipientTeacherId], references: [id], onDelete: SetNull)
+  recipientParent   ParentProfile?       @relation("CommunicationParentRecipient", fields: [recipientParentId], references: [id], onDelete: SetNull)
+
+  @@index([audienceType, status, createdAt])
+  @@index([recipientStudentId, createdAt])
+  @@index([recipientTeacherId, createdAt])
+  @@index([recipientParentId, createdAt])
+}
+
+model CommunicationTemplate {
+  id             Int                  @id @default(autoincrement())
+  name           String
+  description    String?
+  audienceType   CommunicationAudience
+  channel        CommunicationChannel @default(IN_APP)
+  status         TemplateStatus       @default(ACTIVE)
+  subjectTemplate String
+  bodyTemplate   String
+  createdById    Int?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  createdBy      User?                @relation("CommunicationTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  messages       CommunicationMessage[]
+
+  @@index([status, audienceType, createdAt])
+}
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  actorUserId Int?
+  action      String
+  entityType  String
+  entityId    String?
+  summary     String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  actorUser   User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model Semester {
+  id               Int                 @id @default(autoincrement())
+  institutionId    Int
+  name             String
+  code             String
+  startDate        DateTime
+  endDate          DateTime
+  status           SemesterStatus      @default(PLANNED)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  institution      Institution         @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  subjectOfferings SubjectOffering[]
+  enrollments      StudentEnrollment[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId, status])
+}
+
+model Subject {
+  id               Int                 @id @default(autoincrement())
+  institutionId    Int
+  name             String
+  code             String
+  creditHours      Int
+  isActive         Boolean             @default(true)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  institution      Institution         @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  subjectOfferings SubjectOffering[]
+  enrollments      StudentEnrollment[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId, isActive])
+}
+
+model SubjectOffering {
+  id              Int                 @id @default(autoincrement())
+  subjectId       Int
+  semesterId      Int
+  teacherId       Int?
+  gradingPolicyId Int
+  section         String              @default("A")
+  capacity        Int?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  subject         Subject             @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  semester        Semester            @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  teacher         Teacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  gradingPolicy   GradingPolicy       @relation(fields: [gradingPolicyId], references: [id], onDelete: Restrict)
+  enrollments     StudentEnrollment[]
+
+  @@unique([subjectId, semesterId, section])
+  @@index([teacherId, semesterId])
+}
+
+model GradingPolicy {
+  id               Int                      @id @default(autoincrement())
+  institutionId    Int
+  name             String
+  isDefault        Boolean                  @default(false)
+  passMinScore     Decimal                  @db.Decimal(5, 2)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  institution      Institution              @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  components       GradingPolicyComponent[]
+  boundaries       GradingPolicyBoundary[]
+  subjectOfferings SubjectOffering[]
+  enrollments      StudentEnrollment[]
+
+  @@index([institutionId, isDefault])
+}
+
+model GradingPolicyComponent {
+  id          Int                    @id @default(autoincrement())
+  policyId    Int
+  code        AssessmentCode
+  label       String
+  weight      Decimal                @db.Decimal(5, 2)
+  maxScore    Decimal                @db.Decimal(5, 2)
+  isRequired  Boolean                @default(true)
+  sortOrder   Int                    @default(0)
+  policy      GradingPolicy          @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  assessments EnrollmentAssessment[]
+
+  @@unique([policyId, code])
+  @@index([policyId, sortOrder])
+}
+
+model GradingPolicyBoundary {
+  id           Int           @id @default(autoincrement())
+  policyId     Int
+  letterGrade  String
+  minScore     Decimal       @db.Decimal(5, 2)
+  maxScore     Decimal?      @db.Decimal(5, 2)
+  gradePoint   Decimal       @db.Decimal(3, 2)
+  isPassing    Boolean
+  includeInGpa Boolean       @default(true)
+  sortOrder    Int           @default(0)
+  policy       GradingPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, letterGrade])
+  @@index([policyId, sortOrder])
+}
+
+model StudentEnrollment {
+  id                Int                    @id @default(autoincrement())
+  studentId         Int
+  subjectOfferingId Int
+  semesterId        Int
+  subjectId         Int
+  gradingPolicyId   Int
+  status            EnrollmentStatus       @default(REGISTERED)
+  totalScore        Decimal?               @db.Decimal(5, 2)
+  finalLetterGrade  String?
+  gradePoint        Decimal?               @db.Decimal(3, 2)
+  countsTowardsGpa  Boolean                @default(true)
+  passStatus        ResultStatus           @default(INCOMPLETE)
+  earnedCredits     Int?
+  calculationStatus CalculationStatus      @default(PENDING)
+  calculatedAt      DateTime?
+  finalizedAt       DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  student           Student                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectOffering   SubjectOffering        @relation(fields: [subjectOfferingId], references: [id], onDelete: Cascade)
+  semester          Semester               @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  subject           Subject                @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  gradingPolicy     GradingPolicy          @relation(fields: [gradingPolicyId], references: [id], onDelete: Restrict)
+  assessments       EnrollmentAssessment[]
+
+  @@unique([studentId, subjectOfferingId])
+  @@unique([studentId, semesterId, subjectId])
+  @@index([studentId, semesterId, passStatus])
+}
+
+model EnrollmentAssessment {
+  id            Int                    @id @default(autoincrement())
+  enrollmentId  Int
+  componentId   Int
+  rawScore      Decimal?               @db.Decimal(5, 2)
+  weightedScore Decimal?               @db.Decimal(5, 2)
+  enteredById   Int?
+  enteredAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  enrollment    StudentEnrollment      @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  component     GradingPolicyComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@unique([enrollmentId, componentId])
 }
 
 model Attendance {
@@ -56,6 +325,7 @@ model Payment {
   status       String               @default("pending")
   student      Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
   transactions PaymentTransaction[]
+  installments PaymentInstallment[]
 }
 
 model PaymentTransaction {
@@ -72,4 +342,182 @@ model Setting {
   key       String   @unique
   value     String
   updatedAt DateTime @updatedAt
+}
+
+model Assignment {
+  id            Int                    @id @default(autoincrement())
+  title         String
+  description   String?
+  classId       Int
+  teacherId     Int
+  dueAt         DateTime
+  maxScore      Float                  @default(100)
+  attachmentUrl String?
+  status        String                 @default("pending")
+  class         AcademicClass          @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher       Teacher                @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  submissions   AssignmentSubmission[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([classId, dueAt])
+  @@index([teacherId, dueAt])
+}
+
+model AssignmentSubmission {
+  id           Int        @id @default(autoincrement())
+  assignmentId Int
+  studentId    Int
+  submittedAt  DateTime?
+  fileUrl      String?
+  note         String?
+  score        Float?
+  feedback     String?
+  status       String     @default("pending")
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId, status])
+}
+
+model PaymentInstallment {
+  id         Int      @id @default(autoincrement())
+  paymentId  Int
+  amount     Float
+  paidAmount Float    @default(0)
+  dueDate    DateTime
+  status     String   @default("pending")
+  payment    Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([paymentId])
+  @@index([dueDate, status])
+}
+
+model TeacherPerformanceSnapshot {
+  id               Int      @id @default(autoincrement())
+  teacherId        Int
+  month            Int
+  year             Int
+  avgStudentScore  Float    @default(0)
+  attendanceRate   Float    @default(0)
+  successRate      Float    @default(0)
+  performanceScore Float    @default(0)
+  createdAt        DateTime @default(now())
+  teacher          Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, month, year])
+  @@index([year, month, performanceScore])
+}
+
+model AcademicClass {
+  id          Int             @id @default(autoincrement())
+  name        String
+  code        String          @unique
+  credits     Int             @default(3)
+  teacherId   Int?
+  teacher     Teacher?        @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  students    StudentClass[]
+  events      CalendarEvent[]
+  assignments Assignment[]
+  createdAt   DateTime        @default(now())
+
+  @@index([teacherId])
+}
+
+model StudentClass {
+  id        Int           @id @default(autoincrement())
+  studentId Int
+  classId   Int
+  student   Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class     AcademicClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, classId])
+  @@index([classId])
+}
+
+model CalendarEvent {
+  id               Int            @id @default(autoincrement())
+  title            String
+  description      String?
+  type             EventType
+  startAt          DateTime
+  endAt            DateTime?
+  relatedStudentId Int?
+  relatedTeacherId Int?
+  relatedClassId   Int?
+  student          Student?       @relation(fields: [relatedStudentId], references: [id], onDelete: SetNull)
+  teacher          Teacher?       @relation(fields: [relatedTeacherId], references: [id], onDelete: SetNull)
+  class            AcademicClass? @relation(fields: [relatedClassId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([type, startAt])
+  @@index([relatedTeacherId, startAt])
+  @@index([relatedStudentId, startAt])
+  @@index([relatedClassId, startAt])
+}
+
+enum EventType {
+  CLASS
+  EXAM
+  ASSIGNMENT_DEADLINE
+  PAYMENT_DEADLINE
+}
+
+enum SemesterStatus {
+  PLANNED
+  ACTIVE
+  CLOSED
+}
+
+enum AssessmentCode {
+  MIDTERM
+  FINAL_EXAM
+  COURSEWORK
+}
+
+enum EnrollmentStatus {
+  REGISTERED
+  WITHDRAWN
+  COMPLETED
+}
+
+enum ResultStatus {
+  PASS
+  FAIL
+  INCOMPLETE
+}
+
+enum CalculationStatus {
+  PENDING
+  INCOMPLETE
+  CALCULATED
+  FINALIZED
+}
+
+enum CommunicationAudience {
+  ALL
+  STUDENT
+  TEACHER
+  PARENT
+}
+
+enum CommunicationChannel {
+  IN_APP
+  EMAIL
+  SMS
+}
+
+enum CommunicationStatus {
+  DRAFT
+  SENT
+  SCHEDULED
+}
+
+enum TemplateStatus {
+  ACTIVE
+  ARCHIVED
 }

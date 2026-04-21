@@ -1,0 +1,2 @@
+ALTER TABLE "AcademicClass"
+ADD COLUMN "credits" INTEGER NOT NULL DEFAULT 3;
