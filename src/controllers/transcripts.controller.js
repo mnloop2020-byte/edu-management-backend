@@ -1,6 +1,38 @@
 const prisma = require("../lib/prisma");
 const { getStudentAcademicProfile } = require("../services/academic.service");
 
+const listTranscriptStudents = async (req, res) => {
+  try {
+    const students = await prisma.student.findMany({
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        joinedAt: true,
+        _count: {
+          select: {
+            academicEnrollments: true,
+          },
+        },
+      },
+      orderBy: { id: "asc" },
+    });
+
+    res.json({
+      students: students.map((student) => ({
+        id: student.id,
+        name: student.name,
+        status: student.status,
+        joinedAt: student.joinedAt,
+        subjectsCount: student._count.academicEnrollments,
+      })),
+    });
+  } catch (error) {
+    console.error("listTranscriptStudents error:", error);
+    res.status(500).json({ message: "Failed to load transcript students" });
+  }
+};
+
 const getStudentTranscript = async (req, res) => {
   try {
     const studentId = Number(req.params.studentId);
@@ -51,5 +83,6 @@ const getStudentTranscript = async (req, res) => {
 };
 
 module.exports = {
+  listTranscriptStudents,
   getStudentTranscript,
 };
