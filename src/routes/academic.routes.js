@@ -10,6 +10,7 @@ const {
   createSubjectHandler,
   getStudentAcademicProfileHandler,
   getStudentGpaSummaryHandler,
+  listClassSubjectMap,
   listOfferings,
   listSemesters,
   listSubjects,
@@ -23,6 +24,7 @@ router.use(protect);
 router.get("/subjects", listSubjects);
 router.get("/semesters", listSemesters);
 router.get("/offerings", listOfferings);
+router.get("/class-subject-map", listClassSubjectMap);
 router.get("/students/:id/profile", getStudentAcademicProfileHandler);
 router.get("/students/:id/gpa-summary", getStudentGpaSummaryHandler);
 

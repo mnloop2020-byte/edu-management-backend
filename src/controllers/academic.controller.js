@@ -98,6 +98,106 @@ const listOfferings = async (req, res) => {
   }
 };
 
+const listClassSubjectMap = async (req, res) => {
+  try {
+    const where = {};
+    if (req.query.semesterId) where.semesterId = Number(req.query.semesterId);
+    if (req.query.teacherId) where.teacherId = Number(req.query.teacherId);
+
+    const enrollments = await prisma.studentEnrollment.findMany({
+      where,
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+            course: true,
+          },
+        },
+        subjectOffering: {
+          select: {
+            id: true,
+            section: true,
+            subject: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
+            },
+            semester: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
+            },
+            teacher: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ semesterId: "desc" }, { subjectId: "asc" }, { studentId: "asc" }],
+    });
+
+    const classMap = new Map();
+
+    for (const enrollment of enrollments) {
+      const className = String(enrollment.student?.course || "").trim() || "Unassigned Class";
+      if (!classMap.has(className)) {
+        classMap.set(className, {
+          className,
+          subjectsByOfferingId: new Map(),
+        });
+      }
+
+      const bucket = classMap.get(className);
+      const offering = enrollment.subjectOffering;
+      if (!offering) continue;
+
+      if (!bucket.subjectsByOfferingId.has(offering.id)) {
+        bucket.subjectsByOfferingId.set(offering.id, {
+          offeringId: offering.id,
+          section: offering.section,
+          subject: offering.subject,
+          semester: offering.semester,
+          teacher: offering.teacher || null,
+          students: [],
+        });
+      }
+
+      const subjectNode = bucket.subjectsByOfferingId.get(offering.id);
+      subjectNode.students.push({
+        id: enrollment.student.id,
+        name: enrollment.student.name,
+      });
+    }
+
+    const classes = [...classMap.values()]
+      .map((bucket) => ({
+        className: bucket.className,
+        subjects: [...bucket.subjectsByOfferingId.values()].map((subject) => ({
+          offeringId: subject.offeringId,
+          section: subject.section,
+          subject: subject.subject,
+          semester: subject.semester,
+          teacher: subject.teacher,
+          studentsCount: subject.students.length,
+          students: subject.students,
+        })),
+      }))
+      .sort((left, right) => left.className.localeCompare(right.className));
+
+    res.json({ classes });
+  } catch (error) {
+    handleAcademicError(res, error, "Failed to load class-subject map");
+  }
+};
+
 const createSubjectHandler = async (req, res) => {
   try {
     const subject = await createSubject(req.body);
@@ -257,6 +357,7 @@ module.exports = {
   createSubjectHandler,
   getStudentAcademicProfileHandler,
   getStudentGpaSummaryHandler,
+  listClassSubjectMap,
   listOfferings,
   listSemesters,
   listSubjects,
