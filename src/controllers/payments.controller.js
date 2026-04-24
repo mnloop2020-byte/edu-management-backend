@@ -79,10 +79,49 @@ const paymentInclude = {
   installments: { orderBy: { dueDate: "asc" } },
 };
 
+const getStudentProfileIdByUserId = async (userId) => {
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  return student?.id || null;
+};
+
+const getParentLinkedStudentIdsByUserId = async (userId) => {
+  const parent = await prisma.parentProfile.findUnique({
+    where: { userId },
+    select: {
+      studentLinks: {
+        select: { studentId: true },
+      },
+    },
+  });
+
+  if (!parent) return [];
+  return [...new Set((parent.studentLinks || []).map((item) => item.studentId))];
+};
+
 const getAllPayments = async (req, res) => {
   try {
     const { status } = req.query;
+    let where = {};
+
+    if (req.user.role === "STUDENT") {
+      const studentId = await getStudentProfileIdByUserId(req.user.id);
+      if (!studentId) {
+        return res.json({ payments: [] });
+      }
+      where = { studentId };
+    } else if (req.user.role === "PARENT") {
+      const linkedStudentIds = await getParentLinkedStudentIdsByUserId(req.user.id);
+      if (linkedStudentIds.length === 0) {
+        return res.json({ payments: [] });
+      }
+      where = { studentId: { in: linkedStudentIds } };
+    }
+
     const payments = await prisma.payment.findMany({
+      where,
       include: paymentInclude,
       orderBy: { date: "desc" },
     });
@@ -98,7 +137,29 @@ const getAllPayments = async (req, res) => {
 
 const getPaymentsByStudent = async (req, res) => {
   try {
-    const studentId = Number(req.params.studentId);
+    const requestedStudentId = Number(req.params.studentId);
+    let studentId = requestedStudentId;
+
+    if (req.user.role === "STUDENT") {
+      const ownStudentId = await getStudentProfileIdByUserId(req.user.id);
+      if (!ownStudentId) {
+        return res.status(404).json({ message: "Student profile not found" });
+      }
+      if (requestedStudentId !== ownStudentId) {
+        return res.status(403).json({ message: "You can only access your own payments" });
+      }
+      studentId = ownStudentId;
+    } else if (req.user.role === "PARENT") {
+      const linkedStudentIds = await getParentLinkedStudentIdsByUserId(req.user.id);
+      if (linkedStudentIds.length === 0) {
+        return res.status(404).json({ message: "No linked students found for this parent account" });
+      }
+      if (!linkedStudentIds.includes(requestedStudentId)) {
+        return res.status(403).json({ message: "You can only access payments for linked students" });
+      }
+      studentId = requestedStudentId;
+    }
+
     const payments = await prisma.payment.findMany({
       where: { studentId },
       include: paymentInclude,
@@ -115,8 +176,20 @@ const getPaymentsByStudent = async (req, res) => {
 const getPaymentTransactions = async (req, res) => {
   try {
     const paymentId = Number(req.params.id);
-    const payment = await prisma.payment.findUnique({ where: { id: paymentId }, select: { id: true } });
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId }, select: { id: true, studentId: true } });
     if (!payment) return res.status(404).json({ message: "Payment not found" });
+
+    if (req.user.role === "STUDENT") {
+      const ownStudentId = await getStudentProfileIdByUserId(req.user.id);
+      if (!ownStudentId || payment.studentId !== ownStudentId) {
+        return res.status(403).json({ message: "You can only access your own payments" });
+      }
+    } else if (req.user.role === "PARENT") {
+      const linkedStudentIds = await getParentLinkedStudentIdsByUserId(req.user.id);
+      if (!linkedStudentIds.includes(payment.studentId)) {
+        return res.status(403).json({ message: "You can only access transactions for linked students" });
+      }
+    }
 
     const transactions = await prisma.paymentTransaction.findMany({
       where: { paymentId },
@@ -364,6 +437,102 @@ const deletePayment = async (req, res) => {
 
 const getPaymentsSummary = async (req, res) => {
   try {
+    if (req.user.role === "STUDENT") {
+      const studentId = await getStudentProfileIdByUserId(req.user.id);
+      if (!studentId) {
+        return res.json({
+          summary: {
+            annualFee: 0,
+            total: 0,
+            paid: 0,
+            remaining: 0,
+            fullPaid: 0,
+            partial: 0,
+            pending: 0,
+            overdue: 0,
+          },
+        });
+      }
+
+      const [annualFee, payments] = await Promise.all([
+        getAnnualFee(),
+        prisma.payment.findMany({
+          where: { studentId },
+          include: { installments: true },
+        }),
+      ]);
+
+      const summary = payments.map(enrichPayment).reduce((acc, payment) => {
+        acc.total += payment.totalAmount;
+        acc.paid += payment.paidAmount;
+        acc.remaining += payment.remaining;
+        if (payment.status === "paid") acc.fullPaid += 1;
+        if (payment.status === "partial") acc.partial += 1;
+        if (payment.status === "pending") acc.pending += 1;
+        if (payment.status === "overdue") acc.overdue += 1;
+        return acc;
+      }, {
+        annualFee,
+        total: 0,
+        paid: 0,
+        remaining: 0,
+        fullPaid: 0,
+        partial: 0,
+        pending: 0,
+        overdue: 0,
+      });
+
+      return res.json({ summary });
+    }
+
+    if (req.user.role === "PARENT") {
+      const linkedStudentIds = await getParentLinkedStudentIdsByUserId(req.user.id);
+      if (linkedStudentIds.length === 0) {
+        return res.json({
+          summary: {
+            annualFee: 0,
+            total: 0,
+            paid: 0,
+            remaining: 0,
+            fullPaid: 0,
+            partial: 0,
+            pending: 0,
+            overdue: 0,
+          },
+        });
+      }
+
+      const [annualFee, payments] = await Promise.all([
+        getAnnualFee(),
+        prisma.payment.findMany({
+          where: { studentId: { in: linkedStudentIds } },
+          include: { installments: true },
+        }),
+      ]);
+
+      const summary = payments.map(enrichPayment).reduce((acc, payment) => {
+        acc.total += payment.totalAmount;
+        acc.paid += payment.paidAmount;
+        acc.remaining += payment.remaining;
+        if (payment.status === "paid") acc.fullPaid += 1;
+        if (payment.status === "partial") acc.partial += 1;
+        if (payment.status === "pending") acc.pending += 1;
+        if (payment.status === "overdue") acc.overdue += 1;
+        return acc;
+      }, {
+        annualFee,
+        total: 0,
+        paid: 0,
+        remaining: 0,
+        fullPaid: 0,
+        partial: 0,
+        pending: 0,
+        overdue: 0,
+      });
+
+      return res.json({ summary });
+    }
+
     const [annualFee, payments] = await Promise.all([
       getAnnualFee(),
       prisma.payment.findMany({ include: { installments: true } }),
@@ -398,8 +567,31 @@ const getPaymentsSummary = async (req, res) => {
 
 const getStudentPaymentHistory = async (req, res) => {
   try {
+    const requestedStudentId = Number(req.params.id);
+    let studentId = requestedStudentId;
+
+    if (req.user.role === "STUDENT") {
+      const ownStudentId = await getStudentProfileIdByUserId(req.user.id);
+      if (!ownStudentId) {
+        return res.status(404).json({ message: "Student profile not found" });
+      }
+      if (requestedStudentId !== ownStudentId) {
+        return res.status(403).json({ message: "You can only access your own payments" });
+      }
+      studentId = ownStudentId;
+    } else if (req.user.role === "PARENT") {
+      const linkedStudentIds = await getParentLinkedStudentIdsByUserId(req.user.id);
+      if (linkedStudentIds.length === 0) {
+        return res.status(404).json({ message: "No linked students found for this parent account" });
+      }
+      if (!linkedStudentIds.includes(requestedStudentId)) {
+        return res.status(403).json({ message: "You can only access payments for linked students" });
+      }
+      studentId = requestedStudentId;
+    }
+
     const payments = await prisma.payment.findMany({
-      where: { studentId: Number(req.params.id) },
+      where: { studentId },
       include: paymentInclude,
       orderBy: { date: "desc" },
     });
@@ -412,7 +604,24 @@ const getStudentPaymentHistory = async (req, res) => {
 
 const getOverduePayments = async (req, res) => {
   try {
+    let where = {};
+
+    if (req.user.role === "STUDENT") {
+      const studentId = await getStudentProfileIdByUserId(req.user.id);
+      if (!studentId) {
+        return res.json({ reminders: [] });
+      }
+      where = { studentId };
+    } else if (req.user.role === "PARENT") {
+      const linkedStudentIds = await getParentLinkedStudentIdsByUserId(req.user.id);
+      if (linkedStudentIds.length === 0) {
+        return res.json({ reminders: [] });
+      }
+      where = { studentId: { in: linkedStudentIds } };
+    }
+
     const payments = await prisma.payment.findMany({
+      where,
       include: paymentInclude,
       orderBy: { date: "desc" },
     });

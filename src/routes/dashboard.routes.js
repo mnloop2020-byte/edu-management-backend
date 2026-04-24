@@ -1,10 +1,10 @@
 const express = require("express");
 const { getDashboardOverview } = require("../controllers/dashboard.controller");
-const { protect } = require("../middleware/auth.middleware");
+const { protect, requireRole } = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
 router.use(protect);
-router.get("/", getDashboardOverview);
+router.get("/", requireRole("ADMIN", "TEACHER", "STUDENT", "PARENT"), getDashboardOverview);
 
 module.exports = router;

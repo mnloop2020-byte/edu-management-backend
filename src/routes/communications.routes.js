@@ -16,7 +16,7 @@ const router = express.Router();
 router.use(protect);
 
 router.get("/", listCommunications);
-router.get("/templates", listTemplates);
+router.get("/templates", requireRole("ADMIN", "TEACHER"), listTemplates);
 router.post("/templates", requireRole("ADMIN", "TEACHER"), createTemplate);
 router.put("/templates/:id", requireRole("ADMIN", "TEACHER"), updateTemplate);
 router.post("/templates/:id/render", requireRole("ADMIN", "TEACHER"), renderTemplate);

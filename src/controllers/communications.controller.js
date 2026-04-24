@@ -133,16 +133,18 @@ const buildAutoVariables = async (payload = {}) => {
 };
 
 const normalizeCommunicationPayload = (payload = {}) => {
+  const scheduledAt = payload.scheduledAt ? new Date(payload.scheduledAt) : null;
+  const fallbackStatus = scheduledAt ? "SCHEDULED" : "SENT";
   const normalized = {
     subject: payload.subject ? String(payload.subject).trim() : "",
     body: payload.body ? String(payload.body).trim() : "",
     audienceType: String(payload.audienceType || "").trim().toUpperCase(),
     channel: String(payload.channel || "IN_APP").trim().toUpperCase(),
-    status: String(payload.status || "DRAFT").trim().toUpperCase(),
+    status: String(payload.status || fallbackStatus).trim().toUpperCase(),
     recipientStudentId: payload.recipientStudentId ? Number(payload.recipientStudentId) : null,
     recipientTeacherId: payload.recipientTeacherId ? Number(payload.recipientTeacherId) : null,
     recipientParentId: payload.recipientParentId ? Number(payload.recipientParentId) : null,
-    scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : null,
+    scheduledAt,
     templateId: payload.templateId ? Number(payload.templateId) : null,
     variables: payload.variables && typeof payload.variables === "object" ? payload.variables : {},
   };
@@ -158,6 +160,9 @@ const normalizeCommunicationPayload = (payload = {}) => {
   }
   if (normalized.scheduledAt && Number.isNaN(normalized.scheduledAt.getTime())) {
     throw Object.assign(new Error("Invalid scheduledAt"), { status: 400 });
+  }
+  if (normalized.status === "SCHEDULED" && !normalized.scheduledAt) {
+    throw Object.assign(new Error("scheduledAt is required when status is SCHEDULED"), { status: 400 });
   }
 
   return normalized;
@@ -175,9 +180,80 @@ const validateRecipientForAudience = (payload) => {
   }
 };
 
-const listCommunications = async (_req, res) => {
+const getStudentProfileId = async (userId) => {
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  return student?.id || null;
+};
+
+const getTeacherProfileId = async (userId) => {
+  const teacher = await prisma.teacher.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  return teacher?.id || null;
+};
+
+const getParentProfileId = async (userId) => {
+  const parent = await prisma.parentProfile.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  return parent?.id || null;
+};
+
+const listCommunications = async (req, res) => {
   try {
+    const where = {};
+
+    if (req.user.role === "STUDENT") {
+      const studentId = await getStudentProfileId(req.user.id);
+      if (!studentId) {
+        return res.json({ messages: [] });
+      }
+
+      where.status = { in: ["SENT", "SCHEDULED"] };
+      where.OR = [
+        { audienceType: "ALL" },
+        {
+          audienceType: "STUDENT",
+          OR: [{ recipientStudentId: null }, { recipientStudentId: studentId }],
+        },
+      ];
+    } else if (req.user.role === "TEACHER") {
+      const teacherId = await getTeacherProfileId(req.user.id);
+      where.OR = [
+        { createdById: req.user.id },
+        { audienceType: "ALL", status: { in: ["SENT", "SCHEDULED"] } },
+      ];
+
+      if (teacherId) {
+        where.OR.push({
+          audienceType: "TEACHER",
+          status: { in: ["SENT", "SCHEDULED"] },
+          OR: [{ recipientTeacherId: null }, { recipientTeacherId: teacherId }],
+        });
+      }
+    } else if (req.user.role === "PARENT") {
+      const parentId = await getParentProfileId(req.user.id);
+      if (!parentId) {
+        return res.json({ messages: [] });
+      }
+
+      where.status = { in: ["SENT", "SCHEDULED"] };
+      where.OR = [
+        { audienceType: "ALL" },
+        {
+          audienceType: "PARENT",
+          OR: [{ recipientParentId: null }, { recipientParentId: parentId }],
+        },
+      ];
+    }
+
     const messages = await prisma.communicationMessage.findMany({
+      where,
       include: {
         createdBy: { select: { id: true, name: true, email: true } },
         template: { select: { id: true, name: true } },

@@ -46,6 +46,14 @@ const buildAttendanceIndicator = (records) => {
   };
 };
 
+const getStudentIdForUser = async (userId) => {
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  return student?.id || null;
+};
+
 const getAttendanceByDate = async (req, res) => {
   try {
     const start = normalizeDay(req.query.date);
@@ -146,7 +154,20 @@ const getWeeklyAttendance = async (req, res) => {
 
 const getStudentAttendanceStats = async (req, res) => {
   try {
-    const studentId = Number(req.params.id);
+    let studentId = Number(req.params.id);
+
+    if (req.user.role === "STUDENT") {
+      const ownStudentId = await getStudentIdForUser(req.user.id);
+      if (!ownStudentId) {
+        return res.status(404).json({ message: "Student profile not found" });
+      }
+
+      if (studentId !== ownStudentId) {
+        return res.status(403).json({ message: "You can only access your own attendance stats" });
+      }
+      studentId = ownStudentId;
+    }
+
     const { start, end } = getSemesterRange(req.query.date);
     const student = await prisma.student.findUnique({ where: { id: studentId }, select: { id: true, name: true } });
     if (!student) return res.status(404).json({ message: "Student not found" });

@@ -15,7 +15,7 @@ const router = express.Router();
 router.use(protect);
 
 router.get("/meta", getCalendarMeta);
-router.get("/classes", getClasses);
+router.get("/classes", requireAdmin, getClasses);
 router.get("/", getCalendarEvents);
 
 router.post("/classes", requireAdmin, createClass);

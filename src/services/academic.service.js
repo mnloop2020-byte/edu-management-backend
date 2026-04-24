@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { canonicalizeAcademicLabel, canonicalizeSubjectCode } = require("../utils/academicNormalization");
 
 const DEFAULT_INSTITUTION_NAME = "Default Institution";
 const DEFAULT_PASS_MIN_SCORE = 60;
@@ -859,11 +860,12 @@ const getAcademicOverviewMap = async (studentIds, prismaClient = prisma) => {
 const createSubject = async (payload, prismaClient = prisma) =>
   prismaClient.$transaction(async (tx) => {
     const institution = await ensureInstitution(tx);
-    const name = String(payload.name || "").trim();
-    const code = String(payload.code || "").trim().toUpperCase();
+    const rawCode = String(payload.code || "").trim();
+    const name = canonicalizeAcademicLabel(payload.name);
+    const code = canonicalizeSubjectCode(rawCode, name);
     const creditHours = Number(payload.creditHours);
 
-    if (!name || !code) {
+    if (!name || !rawCode || !code) {
       throw createHttpError(400, "name and code are required");
     }
 
@@ -1228,14 +1230,22 @@ const syncAcademicDataFromLegacyInTransaction = async (tx, options = {}) => {
     };
 
     const ensureSubject = async ({ code, name, creditHours }) => {
+      const canonicalName = canonicalizeAcademicLabel(name);
+      const canonicalCode = canonicalizeSubjectCode(code, canonicalName);
       const existing = await tx.subject.findFirst({
         where: {
           institutionId: institution.id,
-          code,
+          code: canonicalCode,
         },
       });
 
       if (existing) {
+        if (existing.name !== canonicalName) {
+          return tx.subject.update({
+            where: { id: existing.id },
+            data: { name: canonicalName },
+          });
+        }
         return existing;
       }
 
@@ -1244,8 +1254,8 @@ const syncAcademicDataFromLegacyInTransaction = async (tx, options = {}) => {
       return tx.subject.create({
         data: {
           institutionId: institution.id,
-          name,
-          code,
+          name: canonicalName,
+          code: canonicalCode,
           creditHours,
           isActive: true,
         },
@@ -1385,7 +1395,7 @@ const syncAcademicDataFromLegacyInTransaction = async (tx, options = {}) => {
     const standaloneCourseMap = new Map();
 
     for (const student of standaloneStudents) {
-      const courseName = String(student.course || "").trim();
+      const courseName = canonicalizeAcademicLabel(student.course);
       if (!courseName) continue;
 
       const courseKey = slugifyCode(courseName, `COURSE-${student.id}`);
@@ -1417,8 +1427,101 @@ const syncAcademicDataFromLegacyInTransaction = async (tx, options = {}) => {
 const syncAcademicDataFromLegacy = async (options = {}, prismaClient = prisma) =>
   syncAcademicDataFromLegacyInTransaction(prismaClient, options);
 
-const bootstrapAcademicDataFromLegacy = async (prismaClient = prisma) =>
-  syncAcademicDataFromLegacy({}, prismaClient);
+const normalizeAcademicNamingData = async (prismaClient = prisma) =>
+  prismaClient.$transaction(async (tx) => {
+    const summary = {
+      subjectsRenamed: 0,
+      subjectsRecoded: 0,
+      teachersNormalized: 0,
+      studentsNormalized: 0,
+    };
+
+    const subjects = await tx.subject.findMany({
+      select: { id: true, institutionId: true, name: true, code: true },
+      orderBy: { id: "asc" },
+    });
+
+    const usedCodesByInstitution = new Map();
+    for (const subject of subjects) {
+      if (!usedCodesByInstitution.has(subject.institutionId)) {
+        usedCodesByInstitution.set(subject.institutionId, new Set());
+      }
+      usedCodesByInstitution.get(subject.institutionId).add(subject.code);
+    }
+
+    for (const subject of subjects) {
+      const nextName = canonicalizeAcademicLabel(subject.name);
+      let nextCode = canonicalizeSubjectCode(subject.code, nextName);
+      const usedCodes = usedCodesByInstitution.get(subject.institutionId);
+
+      if (nextCode !== subject.code && usedCodes.has(nextCode)) {
+        nextCode = subject.code;
+      }
+
+      if (nextName === subject.name && nextCode === subject.code) {
+        continue;
+      }
+
+      await tx.subject.update({
+        where: { id: subject.id },
+        data: {
+          name: nextName,
+          code: nextCode,
+        },
+      });
+
+      if (nextName !== subject.name) summary.subjectsRenamed += 1;
+      if (nextCode !== subject.code) {
+        summary.subjectsRecoded += 1;
+        usedCodes.delete(subject.code);
+        usedCodes.add(nextCode);
+      }
+    }
+
+    const teachers = await tx.teacher.findMany({
+      select: { id: true, subject: true },
+      orderBy: { id: "asc" },
+    });
+
+    for (const teacher of teachers) {
+      const nextSubject = canonicalizeAcademicLabel(teacher.subject);
+      if (nextSubject === teacher.subject) continue;
+
+      await tx.teacher.update({
+        where: { id: teacher.id },
+        data: { subject: nextSubject },
+      });
+      summary.teachersNormalized += 1;
+    }
+
+    const students = await tx.student.findMany({
+      select: { id: true, course: true },
+      orderBy: { id: "asc" },
+    });
+
+    for (const student of students) {
+      const nextCourse = canonicalizeAcademicLabel(student.course);
+      if (nextCourse === student.course) continue;
+
+      await tx.student.update({
+        where: { id: student.id },
+        data: { course: nextCourse },
+      });
+      summary.studentsNormalized += 1;
+    }
+
+    return summary;
+  });
+
+const bootstrapAcademicDataFromLegacy = async (prismaClient = prisma) => {
+  const normalization = await normalizeAcademicNamingData(prismaClient);
+  const syncSummary = await syncAcademicDataFromLegacy({}, prismaClient);
+
+  return {
+    ...syncSummary,
+    ...normalization,
+  };
+};
 
 module.exports = {
   buildAcademicView,

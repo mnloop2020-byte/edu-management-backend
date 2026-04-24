@@ -1,9 +1,13 @@
+const bcrypt = require("bcryptjs");
 const prisma = require("../lib/prisma");
 const {
   getAcademicOverviewMap,
   getStudentAcademicProfile,
 } = require("../services/academic.service");
 const { createAuditLog } = require("../services/audit.service");
+const { canonicalizeAcademicLabel } = require("../utils/academicNormalization");
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const isEnvEnabled = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -151,6 +155,13 @@ const getAllStudents = async (req, res) => {
 
     const students = await prisma.student.findMany({
       include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            createdAt: true,
+          },
+        },
         attendance: {
           where: { date: { gte: semesterStart } },
           select: { status: true },
@@ -195,6 +206,13 @@ const getAllStudents = async (req, res) => {
           attendanceRate: stats.attendanceRate,
           absentCount: stats.absentCount,
           indicator: stats.indicator,
+          account: student.user
+            ? {
+                id: student.user.id,
+                email: student.user.email,
+                createdAt: student.user.createdAt,
+              }
+            : null,
         };
       }),
     });
@@ -210,6 +228,14 @@ const getStudentById = async (req, res) => {
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            createdAt: true,
+            role: true,
+          },
+        },
         attendance: { orderBy: { date: "desc" } },
         payments: {
           include: { transactions: { orderBy: { date: "desc" } }, installments: true },
@@ -278,6 +304,14 @@ const getStudentById = async (req, res) => {
     res.json({
       student: {
         ...student,
+        account: student.user
+          ? {
+              id: student.user.id,
+              email: student.user.email,
+              role: student.user.role,
+              createdAt: student.user.createdAt,
+            }
+          : null,
         subjects,
         academicSummary: {
           gpa: academic.gpa ?? null,
@@ -302,16 +336,82 @@ const getStudentById = async (req, res) => {
   }
 };
 
+const getMyStudentProfile = async (req, res) => {
+  try {
+    let student = await prisma.student.findUnique({
+      where: { userId: req.user.id },
+      select: { id: true },
+    });
+
+    const allowUnsafeNameAutoLink = isEnvEnabled(process.env.ALLOW_UNSAFE_NAME_AUTOLINK);
+
+    if (!student && allowUnsafeNameAutoLink) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { id: true, name: true },
+      });
+
+      const normalizedName = String(user?.name || "").trim();
+      if (normalizedName) {
+        const matches = await prisma.student.findMany({
+          where: {
+            userId: null,
+            name: { equals: normalizedName, mode: "insensitive" },
+          },
+          select: { id: true },
+          take: 2,
+        });
+
+        if (matches.length === 1) {
+          await prisma.student.update({
+            where: { id: matches[0].id },
+            data: { userId: req.user.id },
+          });
+
+          await createAuditLog({
+            actorUserId: req.user?.id,
+            action: "STUDENT_ACCOUNT_AUTO_LINK",
+            entityType: "Student",
+            entityId: matches[0].id,
+            summary: "Auto-linked student account to student profile",
+            metadata: { reason: "matched_by_name_case_insensitive" },
+          });
+
+          student = { id: matches[0].id };
+        } else if (matches.length > 1) {
+          return res.status(409).json({
+            message: "Multiple student profiles match this account name. Please link the account from admin panel.",
+          });
+        }
+      }
+    }
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student profile not linked to this account yet. Please ask admin to link your account from Students page.",
+      });
+    }
+
+    req.params.id = String(student.id);
+    return getStudentById(req, res);
+  } catch (err) {
+    console.error("getMyStudentProfile error:", err);
+    res.status(500).json({ message: "Failed to load student profile" });
+  }
+};
+
 const createStudent = async (req, res) => {
   try {
     const { name, course, grade, status } = req.body;
+    const normalizedName = String(name || "").trim();
+    const normalizedCourse = canonicalizeAcademicLabel(course);
 
-    if (!name || !course) {
+    if (!normalizedName || !normalizedCourse) {
       return res.status(400).json({ message: "name and course are required" });
     }
 
     const student = await prisma.student.create({
-      data: { name, course, grade: grade || null, status: status || "Active" },
+      data: { name: normalizedName, course: normalizedCourse, grade: grade || null, status: status || "Active" },
     });
 
     await createAuditLog({
@@ -330,10 +430,218 @@ const createStudent = async (req, res) => {
   }
 };
 
+const createStudentAccount = async (req, res) => {
+  try {
+    const studentId = Number(req.params.id);
+    const { email, password, name } = req.body;
+
+    if (!studentId) {
+      return res.status(400).json({ message: "Invalid student id" });
+    }
+
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedPassword = String(password || "");
+    const normalizedName = String(name || "").trim();
+
+    if (!normalizedEmail || !normalizedPassword) {
+      return res.status(400).json({ message: "email and password are required" });
+    }
+
+    if (!EMAIL_PATTERN.test(normalizedEmail)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    if (normalizedPassword.length < 8) {
+      return res.status(400).json({ message: "Password must be at least 8 characters" });
+    }
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        user: {
+          select: { id: true, email: true },
+        },
+      },
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    if (student.userId || student.user) {
+      return res.status(409).json({ message: "Student already has a linked account" });
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({ message: "Email is already in use" });
+    }
+
+    const hashedPassword = await bcrypt.hash(normalizedPassword, 10);
+    const user = await prisma.user.create({
+      data: {
+        name: normalizedName || student.name,
+        email: normalizedEmail,
+        password: hashedPassword,
+        role: "STUDENT",
+        student: {
+          connect: { id: student.id },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "STUDENT_ACCOUNT_CREATE",
+      entityType: "Student",
+      entityId: student.id,
+      summary: `Created login account for ${student.name}`,
+      metadata: { email: user.email, userId: user.id },
+    });
+
+    res.status(201).json({
+      message: "Student account created successfully",
+      user,
+      studentId: student.id,
+    });
+  } catch (err) {
+    console.error("createStudentAccount error:", err);
+    res.status(500).json({ message: "Failed to create student account" });
+  }
+};
+
+const updateStudentAccount = async (req, res) => {
+  try {
+    const studentId = Number(req.params.id);
+    const { email, password, name } = req.body;
+
+    if (!studentId) {
+      return res.status(400).json({ message: "Invalid student id" });
+    }
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    if (!student.userId || !student.user) {
+      return res.status(404).json({ message: "Student does not have a linked account" });
+    }
+
+    const updateData = {};
+
+    if (email !== undefined) {
+      const normalizedEmail = String(email || "").trim().toLowerCase();
+      if (!normalizedEmail) {
+        return res.status(400).json({ message: "email cannot be empty" });
+      }
+      if (!EMAIL_PATTERN.test(normalizedEmail)) {
+        return res.status(400).json({ message: "Invalid email format" });
+      }
+
+      if (normalizedEmail !== student.user.email) {
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            email: normalizedEmail,
+            NOT: { id: student.user.id },
+          },
+          select: { id: true },
+        });
+        if (existingUser) {
+          return res.status(409).json({ message: "Email is already in use" });
+        }
+        updateData.email = normalizedEmail;
+      }
+    }
+
+    if (name !== undefined) {
+      const normalizedName = String(name || "").trim();
+      if (!normalizedName) {
+        return res.status(400).json({ message: "name cannot be empty" });
+      }
+      updateData.name = normalizedName;
+    }
+
+    if (password !== undefined) {
+      const normalizedPassword = String(password || "");
+      if (normalizedPassword.length > 0 && normalizedPassword.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters" });
+      }
+      if (normalizedPassword.length > 0) {
+        updateData.password = await bcrypt.hash(normalizedPassword, 10);
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: "No account changes provided" });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: student.user.id },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    await createAuditLog({
+      actorUserId: req.user?.id,
+      action: "STUDENT_ACCOUNT_UPDATE",
+      entityType: "Student",
+      entityId: student.id,
+      summary: `Updated login account for ${student.name}`,
+      metadata: {
+        userId: updatedUser.id,
+        emailChanged: Boolean(updateData.email),
+        nameChanged: Boolean(updateData.name),
+        passwordChanged: Boolean(updateData.password),
+      },
+    });
+
+    res.json({
+      message: "Student account updated successfully",
+      user: updatedUser,
+      studentId: student.id,
+    });
+  } catch (err) {
+    console.error("updateStudentAccount error:", err);
+    res.status(500).json({ message: "Failed to update student account" });
+  }
+};
+
 const updateStudent = async (req, res) => {
   try {
     const studentId = Number(req.params.id);
     const { name, course, grade, status } = req.body;
+    const normalizedName = name !== undefined ? String(name || "").trim() : undefined;
+    const normalizedCourse = course !== undefined ? canonicalizeAcademicLabel(course) : undefined;
 
     const existing = await prisma.student.findUnique({ where: { id: studentId } });
     if (!existing) {
@@ -341,8 +649,15 @@ const updateStudent = async (req, res) => {
     }
 
     const data = {};
-    if (name !== undefined) data.name = name;
-    if (course !== undefined) data.course = course;
+    if (name !== undefined && !normalizedName) {
+      return res.status(400).json({ message: "name cannot be empty" });
+    }
+    if (course !== undefined && !normalizedCourse) {
+      return res.status(400).json({ message: "course cannot be empty" });
+    }
+
+    if (normalizedName !== undefined) data.name = normalizedName;
+    if (normalizedCourse !== undefined) data.course = normalizedCourse;
     if (grade !== undefined) data.grade = grade;
     if (status !== undefined) data.status = status;
 
@@ -408,4 +723,13 @@ const deleteStudent = async (req, res) => {
   }
 };
 
-module.exports = { getAllStudents, getStudentById, createStudent, updateStudent, deleteStudent };
+module.exports = {
+  getAllStudents,
+  getStudentById,
+  getMyStudentProfile,
+  createStudent,
+  createStudentAccount,
+  updateStudentAccount,
+  updateStudent,
+  deleteStudent,
+};

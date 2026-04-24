@@ -5,7 +5,7 @@ const { protect, requireAdmin } = require("../middleware/auth.middleware");
 
 router.use(protect);
 
-router.get("/", getSettings);
+router.get("/", requireAdmin, getSettings);
 router.post("/", requireAdmin, updateSetting);
 
 module.exports = router;

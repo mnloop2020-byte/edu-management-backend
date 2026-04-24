@@ -25,8 +25,8 @@ router.get("/subjects", listSubjects);
 router.get("/semesters", listSemesters);
 router.get("/offerings", listOfferings);
 router.get("/class-subject-map", listClassSubjectMap);
-router.get("/students/:id/profile", getStudentAcademicProfileHandler);
-router.get("/students/:id/gpa-summary", getStudentGpaSummaryHandler);
+router.get("/students/:id/profile", requireRole("ADMIN", "TEACHER", "STUDENT"), getStudentAcademicProfileHandler);
+router.get("/students/:id/gpa-summary", requireRole("ADMIN", "TEACHER", "STUDENT"), getStudentGpaSummaryHandler);
 
 router.post("/bootstrap", requireAdmin, bootstrapAcademicHandler);
 router.post("/subjects", requireAdmin, createSubjectHandler);

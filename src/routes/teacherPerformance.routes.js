@@ -11,9 +11,9 @@ const router = express.Router();
 
 router.use(protect);
 
-router.get("/", getTeacherPerformance);
-router.get("/top", getTopTeachers);
-router.get("/:id/history", getTeacherPerformanceHistory);
+router.get("/", requireRole("ADMIN", "TEACHER"), getTeacherPerformance);
+router.get("/top", requireRole("ADMIN", "TEACHER"), getTopTeachers);
+router.get("/:id/history", requireRole("ADMIN", "TEACHER"), getTeacherPerformanceHistory);
 router.post("/recalculate", requireRole("ADMIN"), recalculateTeacherPerformance);
 
 module.exports = router;

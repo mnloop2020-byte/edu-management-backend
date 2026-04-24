@@ -1,8 +1,9 @@
 const jwt = require("jsonwebtoken");
+const prisma = require("../lib/prisma");
 
 const normalizeRole = (role) => String(role || "").toUpperCase();
 
-const protect = (req, res, next) => {
+const protect = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -13,7 +14,26 @@ const protect = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { ...decoded, role: normalizeRole(decoded.role) };
+    const userId = Number(decoded?.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ message: "Invalid authentication token payload" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, name: true },
+    });
+
+    if (!user) {
+      return res.status(401).json({ message: "Session is no longer valid. Please sign in again." });
+    }
+
+    req.user = {
+      id: user.id,
+      email: user.email,
+      role: normalizeRole(user.role),
+      name: user.name,
+    };
     next();
   } catch (err) {
     return res.status(401).json({ message: "Invalid or expired token" });

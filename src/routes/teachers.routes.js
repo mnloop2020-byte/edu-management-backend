@@ -7,12 +7,12 @@ const {
   updateTeacher,
   deleteTeacher,
 } = require("../controllers/teachers.controller");
-const { protect, requireAdmin } = require("../middleware/auth.middleware");
+const { protect, requireAdmin, requireRole } = require("../middleware/auth.middleware");
 
 router.use(protect);
 
-router.get("/", getAllTeachers);
-router.get("/:id", getTeacherById);
+router.get("/", requireRole("ADMIN", "TEACHER"), getAllTeachers);
+router.get("/:id", requireRole("ADMIN", "TEACHER"), getTeacherById);
 router.post("/", requireAdmin, createTeacher);
 router.put("/:id", requireAdmin, updateTeacher);
 router.delete("/:id", requireAdmin, deleteTeacher);

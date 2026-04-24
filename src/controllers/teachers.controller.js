@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma");
 const { createAuditLog } = require("../services/audit.service");
+const { canonicalizeAcademicLabel } = require("../utils/academicNormalization");
 
 const getAllTeachers = async (req, res) => {
   try {
@@ -33,15 +34,17 @@ const getTeacherById = async (req, res) => {
 const createTeacher = async (req, res) => {
   try {
     const { name, subject, phone, avatarUrl, classes } = req.body;
+    const normalizedName = String(name || "").trim();
+    const normalizedSubject = canonicalizeAcademicLabel(subject);
 
-    if (!name || !subject) {
+    if (!normalizedName || !normalizedSubject) {
       return res.status(400).json({ message: "name and subject are required" });
     }
 
     const teacher = await prisma.teacher.create({
       data: {
-        name,
-        subject,
+        name: normalizedName,
+        subject: normalizedSubject,
         phone: phone || null,
         avatarUrl: avatarUrl || null,
         classes: Number.isFinite(Number(classes)) ? Number(classes) : 0,
@@ -68,6 +71,8 @@ const updateTeacher = async (req, res) => {
   try {
     const teacherId = Number(req.params.id);
     const { name, subject, phone, avatarUrl, classes } = req.body;
+    const normalizedName = name !== undefined ? String(name || "").trim() : undefined;
+    const normalizedSubject = subject !== undefined ? canonicalizeAcademicLabel(subject) : undefined;
 
     const existing = await prisma.teacher.findUnique({ where: { id: teacherId } });
     if (!existing) {
@@ -75,8 +80,15 @@ const updateTeacher = async (req, res) => {
     }
 
     const data = {};
-    if (name !== undefined) data.name = name;
-    if (subject !== undefined) data.subject = subject;
+    if (name !== undefined && !normalizedName) {
+      return res.status(400).json({ message: "name cannot be empty" });
+    }
+    if (subject !== undefined && !normalizedSubject) {
+      return res.status(400).json({ message: "subject cannot be empty" });
+    }
+
+    if (normalizedName !== undefined) data.name = normalizedName;
+    if (normalizedSubject !== undefined) data.subject = normalizedSubject;
     if (phone !== undefined) data.phone = phone;
     if (avatarUrl !== undefined) data.avatarUrl = avatarUrl || null;
     if (classes !== undefined) data.classes = Number(classes);

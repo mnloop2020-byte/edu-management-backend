@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.use(protect);
 
-router.get("/", getAssignments);
+router.get("/", requireRole("ADMIN", "TEACHER"), getAssignments);
 router.get("/my", requireRole("STUDENT", "ADMIN"), getMyAssignments);
 router.get("/:id/submissions", requireRole("TEACHER", "ADMIN"), getAssignmentSubmissions);
 router.post("/", requireRole("TEACHER", "ADMIN"), createAssignment);

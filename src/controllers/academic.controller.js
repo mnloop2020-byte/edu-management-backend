@@ -325,6 +325,20 @@ const recalculateEnrollmentHandler = async (req, res) => {
 const getStudentAcademicProfileHandler = async (req, res) => {
   try {
     const studentId = Number(req.params.id);
+
+    if (req.user.role === "STUDENT") {
+      const ownStudent = await prisma.student.findUnique({
+        where: { userId: req.user.id },
+        select: { id: true },
+      });
+      if (!ownStudent) {
+        return res.status(404).json({ message: "Student profile not found" });
+      }
+      if (ownStudent.id !== studentId) {
+        return res.status(403).json({ message: "You can only access your own academic profile" });
+      }
+    }
+
     const profile = await getStudentAcademicProfile(studentId, {
       semesterId: req.query.semesterId ? Number(req.query.semesterId) : undefined,
     });
@@ -338,6 +352,20 @@ const getStudentAcademicProfileHandler = async (req, res) => {
 const getStudentGpaSummaryHandler = async (req, res) => {
   try {
     const studentId = Number(req.params.id);
+
+    if (req.user.role === "STUDENT") {
+      const ownStudent = await prisma.student.findUnique({
+        where: { userId: req.user.id },
+        select: { id: true },
+      });
+      if (!ownStudent) {
+        return res.status(404).json({ message: "Student profile not found" });
+      }
+      if (ownStudent.id !== studentId) {
+        return res.status(403).json({ message: "You can only access your own GPA summary" });
+      }
+    }
+
     const profile = await getStudentAcademicProfile(studentId, {
       semesterId: req.query.semesterId ? Number(req.query.semesterId) : undefined,
     });

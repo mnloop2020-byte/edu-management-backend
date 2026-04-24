@@ -11,6 +11,8 @@ const parseDate = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const isClassEvent = (value) => String(value || "").toUpperCase() === "CLASS";
+
 const normalizeEvent = (event) => ({
   ...event,
   student: event.student || null,
@@ -18,8 +20,55 @@ const normalizeEvent = (event) => ({
   class: event.class || null,
 });
 
+const getStudentContext = async (userId) => {
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: {
+      id: true,
+      name: true,
+      course: true,
+      classes: { select: { classId: true } },
+    },
+  });
+
+  if (!student) return null;
+
+  return {
+    id: student.id,
+    name: student.name,
+    course: student.course,
+    classIds: student.classes.map((item) => item.classId),
+  };
+};
+
 const getCalendarMeta = async (req, res) => {
   try {
+    if (req.user.role === "STUDENT") {
+      const studentContext = await getStudentContext(req.user.id);
+      if (!studentContext) {
+        return res.json({ students: [], teachers: [], classes: [] });
+      }
+
+      const classes = await prisma.academicClass.findMany({
+        where: { id: { in: studentContext.classIds.length ? studentContext.classIds : [0] } },
+        select: { id: true, name: true, code: true, teacherId: true, teacher: { select: { id: true, name: true, subject: true } } },
+        orderBy: { name: "asc" },
+      });
+
+      const teacherMap = new Map();
+      for (const item of classes) {
+        if (item.teacher?.id) {
+          teacherMap.set(item.teacher.id, { id: item.teacher.id, name: item.teacher.name, subject: item.teacher.subject || "" });
+        }
+      }
+
+      return res.json({
+        students: [{ id: studentContext.id, name: studentContext.name, course: studentContext.course }],
+        teachers: [...teacherMap.values()],
+        classes: classes.map((item) => ({ id: item.id, name: item.name, code: item.code, teacherId: item.teacherId })),
+      });
+    }
+
     const [students, teachers, classes] = await Promise.all([
       prisma.student.findMany({ select: { id: true, name: true, course: true }, orderBy: { name: "asc" } }),
       prisma.teacher.findMany({ select: { id: true, name: true, subject: true }, orderBy: { name: "asc" } }),
@@ -50,9 +99,41 @@ const getCalendarEvents = async (req, res) => {
     };
 
     if (req.query.type) where.type = req.query.type;
-    if (req.query.studentId) where.relatedStudentId = Number(req.query.studentId);
-    if (req.query.teacherId) where.relatedTeacherId = Number(req.query.teacherId);
-    if (req.query.classId) where.relatedClassId = Number(req.query.classId);
+    if (req.user.role === "STUDENT") {
+      const studentContext = await getStudentContext(req.user.id);
+      if (!studentContext) {
+        return res.json({ events: [] });
+      }
+
+      where.OR = [
+        { relatedStudentId: studentContext.id },
+        ...(studentContext.classIds.length > 0 ? [{ relatedClassId: { in: studentContext.classIds } }] : []),
+      ];
+
+      if (req.query.classId) {
+        const requestedClassId = Number(req.query.classId);
+        if (!studentContext.classIds.includes(requestedClassId)) {
+          return res.json({ events: [] });
+        }
+        where.relatedClassId = requestedClassId;
+      }
+
+      if (req.query.studentId) {
+        const requestedStudentId = Number(req.query.studentId);
+        if (requestedStudentId !== studentContext.id) {
+          return res.json({ events: [] });
+        }
+        where.relatedStudentId = requestedStudentId;
+      }
+
+      if (req.query.teacherId) {
+        where.relatedTeacherId = Number(req.query.teacherId);
+      }
+    } else {
+      if (req.query.studentId) where.relatedStudentId = Number(req.query.studentId);
+      if (req.query.teacherId) where.relatedTeacherId = Number(req.query.teacherId);
+      if (req.query.classId) where.relatedClassId = Number(req.query.classId);
+    }
 
     const events = await prisma.calendarEvent.findMany({
       where,
@@ -80,6 +161,10 @@ const createCalendarEvent = async (req, res) => {
 
     if (!parsedStartAt || (endAt && !parsedEndAt)) {
       return res.status(400).json({ message: "Invalid event date" });
+    }
+
+    if (isClassEvent(type) && (!relatedTeacherId || !relatedClassId)) {
+      return res.status(400).json({ message: "Teacher and class are required for class events" });
     }
 
     const event = await prisma.calendarEvent.create({
@@ -134,6 +219,14 @@ const updateCalendarEvent = async (req, res) => {
     if (relatedTeacherId !== undefined) data.relatedTeacherId = relatedTeacherId ? Number(relatedTeacherId) : null;
     if (relatedClassId !== undefined) data.relatedClassId = relatedClassId ? Number(relatedClassId) : null;
 
+    const nextType = data.type || existing.type;
+    const nextTeacherId = data.relatedTeacherId !== undefined ? data.relatedTeacherId : existing.relatedTeacherId;
+    const nextClassId = data.relatedClassId !== undefined ? data.relatedClassId : existing.relatedClassId;
+
+    if (isClassEvent(nextType) && (!nextTeacherId || !nextClassId)) {
+      return res.status(400).json({ message: "Teacher and class are required for class events" });
+    }
+
     const event = await prisma.calendarEvent.update({
       where: { id: eventId },
       data,
@@ -162,6 +255,10 @@ const deleteCalendarEvent = async (req, res) => {
 
 const getClasses = async (req, res) => {
   try {
+    if (req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "You do not have permission for this action" });
+    }
+
     const classes = await prisma.academicClass.findMany({
       include: { teacher: { select: { id: true, name: true } } },
       orderBy: { name: "asc" },

@@ -1,6 +1,8 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const authRoutes = require("./routes/auth.routes");
 const studentsRoutes = require("./routes/students.routes");
@@ -23,6 +25,25 @@ const transcriptsRoutes = require("./routes/transcripts.routes");
 const { bootstrapAcademicDataFromLegacy } = require("./services/academic.service");
 
 const app = express();
+const isProduction = process.env.NODE_ENV === "production";
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || "120kb";
+
+if (!process.env.JWT_SECRET) {
+  throw new Error("Missing JWT_SECRET environment variable");
+}
+
+if (isProduction && String(process.env.JWT_SECRET).length < 32) {
+  throw new Error("JWT_SECRET must be at least 32 characters in production");
+}
+
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
 const allowedOrigins = new Set([
   "http://localhost:5173",
@@ -36,6 +57,21 @@ const allowedOrigins = new Set([
 ]);
 
 const vercelPreviewPattern = /^https:\/\/edu-management-system(?:-[a-z0-9]+)?-mnloop2020-bytes-projects\.vercel\.app$/i;
+const generalLimiter = rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  max: Number(process.env.RATE_LIMIT_MAX || 600),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please try again shortly." },
+});
+
+const authLimiter = rateLimit({
+  windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000),
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 25),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many authentication attempts. Please try again later." },
+});
 
 app.use(cors({
   origin(origin, callback) {
@@ -48,7 +84,11 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: jsonBodyLimit }));
+app.use(express.urlencoded({ extended: false, limit: jsonBodyLimit }));
+app.use("/api", generalLimiter);
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentsRoutes);
@@ -71,6 +111,23 @@ app.use("/api/transcripts", transcriptsRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "EduSystem API is running" });
+});
+
+app.use((err, req, res, next) => {
+  if (err?.message === "Not allowed by CORS") {
+    return res.status(403).json({ message: "Origin is not allowed by CORS policy" });
+  }
+
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ message: "Request payload is too large" });
+  }
+
+  if (err instanceof SyntaxError && Object.prototype.hasOwnProperty.call(err, "body")) {
+    return res.status(400).json({ message: "Invalid JSON payload" });
+  }
+
+  console.error("Unhandled server error:", err);
+  return res.status(500).json({ message: "Server error" });
 });
 
 const PORT = process.env.PORT || 5000;
